@@ -1,0 +1,148 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: susi
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - susi-network
+
+  # Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - susi-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - susi-network
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: susi
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - susi-network
+
+  # Property Service
+  property-service:
+    build:
+      context: ./services/property
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: susi
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - susi-network
+
+  # Tenant Service
+  tenant-service:
+    build:
+      context: ./services/tenant
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: susi
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - susi-network
+
+  # Renovation Service
+  renovation-service:
+    build:
+      context: ./services/renovation
+      dockerfile: Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: susi
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - susi-network
+
+  # API Gateway (Optional)
+  api-gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AUTH_SERVICE_URL: http://auth-service:8081
+      PROPERTY_SERVICE_URL: http://property-service:8082
+      TENANT_SERVICE_URL: http://tenant-service:8083
+      RENOVATION_SERVICE_URL: http://renovation-service:8084
+    depends_on:
+      - auth-service
+      - property-service
+      - tenant-service
+      - renovation-service
+    networks:
+      - susi-network
+
+volumes:
+  postgres_data:
+
+networks:
+  susi-network:
+    driver: bridge 

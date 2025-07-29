@@ -2,8 +2,8 @@ package models
 
 import "time"
 
-type Apartment struct {
-	ID         int       `json:"id"`
+type Property struct {
+	ID         int       `json:"id" gorm:"primaryKey;autoIncrement"`
 	Address    string    `json:"address"`
 	BaseRent   int       `json:"base_rent"`
 	LandLordID int       `json:"land_lord_id"`

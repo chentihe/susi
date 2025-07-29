@@ -6,65 +6,67 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"github.com/tihe/susi/backend/app"
-	"github.com/tihe/susi/backend/events"
-	"github.com/tihe/susi/backend/models"
-	"github.com/tihe/susi/backend/services"
+
+	"github.com/segmentio/kafka-go"
 )
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
+	// Database connection
+	dsn := "host=localhost user=postgres password=postgres dbname=susi port=5432 sslmode=disable"
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	kafkaBrokers := strings.Split(os.Getenv("KAFKA_BROKERS"), ",")
-	kafkaTopic := os.Getenv("KAFKA_TOPIC")
-	producer := events.NewKafkaProducer(events.KafkaConfig{
-		Brokers: kafkaBrokers,
-		Topic:   kafkaTopic,
-	})
-	defer producer.Close()
+	// Kafka producer
+	producer := &kafka.Writer{
+		Addr:     kafka.TCP("localhost:9092"),
+		Topic:    "property-events",
+		Balancer: &kafka.LeastBytes{},
+	}
 
-	// Repositories
+	// Initialize repositories
 	propertyRepo := models.NewPropertyImpl(db)
 	roomRepo := models.NewRoomImpl(db)
-	tenantRepo := models.NewTenantImpl(db)
-	renovationRepo := models.NewRenovationImpl(db)
 	landLordRepo := models.NewLandLordImpl(db)
-	adminRepo := models.NewAdminImpl(db)
 
-	// Services
+	// Initialize services
 	propertyService := services.NewPropertyService(propertyRepo, producer)
 	roomService := services.NewRoomService(roomRepo, producer)
-	tenantService := services.NewTenantService(tenantRepo, producer)
-	renovationService := services.NewRenovationService(renovationRepo, producer)
 	landLordService := services.NewLandLordService(landLordRepo, producer)
-	adminService := services.NewAdminService(adminRepo, producer)
 
-	ctx := app.NewAppContext(
-		db,
-		producer,
-		propertyService,
-		roomService,
-		tenantService,
-		renovationService,
-		landLordService,
-		adminService,
-	)
-
-	router := app.NewAppRouter(ctx)
+	// Setup router
+	router := gin.Default()
+	
+	// API versioning
+	apiV1 := router.Group("/api/v1")
+	
+	// Protected routes (require JWT)
+	protected := apiV1.Group("")
+	protected.Use(middleware.JWTAuthMiddleware())
+	
+	// Property routes
+	propertyHandler := handlers.NewPropertyHandler(propertyService)
+	propertyHandler.RegisterPropertyRoutes(protected)
+	
+	// Room routes
+	roomHandler := handlers.NewRoomHandler(roomService)
+	roomHandler.RegisterRoomRoutes(protected)
+	
+	// LandLord routes
+	landLordHandler := handlers.NewLandLordHandler(landLordService)
+	landLordHandler.RegisterLandLordRoutes(protected)
 
 	// Graceful shutdown setup
 	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: router.Engine,
+		Addr:    ":8082", // Property service port
+		Handler: router,
 	}
 
 	// Start server in goroutine
@@ -78,7 +80,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("Shutting down server...")
+	log.Println("Shutting down property service...")
 
 	// The context is used to inform the server it has 5 seconds to finish
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -86,5 +88,5 @@ func main() {
 	if err := srv.Shutdown(ctxTimeout); err != nil {
 		log.Fatal("Server forced to shutdown:", err)
 	}
-	log.Println("Server exiting")
+	log.Println("Property service exiting")
 } 
