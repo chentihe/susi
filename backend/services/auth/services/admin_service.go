@@ -2,8 +2,9 @@ package services
 
 import (
 	"time"
-	"github.com/tihe/susi/backend/models"
-	"github.com/tihe/susi/backend/events"
+
+	"github.com/tihe/susi-auth-service/models"
+	"github.com/tihe/susi-shared/events"
 )
 
 type AdminService interface {
@@ -18,7 +19,7 @@ type AdminServiceImpl struct {
 
 func NewAdminService(repo models.AdminRepository, producer *events.KafkaProducer) AdminService {
 	return &AdminServiceImpl{
-		Repo: repo,
+		Repo:          repo,
 		KafkaProducer: producer,
 	}
 }
@@ -35,4 +36,4 @@ func (s *AdminServiceImpl) CreateAdmin(admin *models.Admin) error {
 	}
 	s.KafkaProducer.Publish(event)
 	return nil
-} 
+}

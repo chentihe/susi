@@ -1,8 +1,9 @@
-package auth
+package services
 
 import (
-	"github.com/dgrijalva/jwt-go"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
 )
 
 var jwtKey = []byte("your_secret_key")

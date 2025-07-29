@@ -3,9 +3,10 @@ package events
 import (
 	"context"
 	"encoding/json"
-	"github.com/segmentio/kafka-go"
 	"log"
 	"time"
+
+	"github.com/segmentio/kafka-go"
 )
 
 type KafkaConfig struct {
@@ -21,7 +22,7 @@ func NewKafkaProducer(cfg KafkaConfig) *KafkaProducer {
 	writer := kafka.NewWriter(kafka.WriterConfig{
 		Brokers:  cfg.Brokers,
 		Topic:    cfg.Topic,
-		Balancers: []kafka.Balancer{kafka.LeastBytes{}},
+		Balancer: &kafka.LeastBytes{},
 	})
 	return &KafkaProducer{writer: writer}
 }
@@ -42,4 +43,4 @@ func (p *KafkaProducer) Close() {
 	if err := p.writer.Close(); err != nil {
 		log.Println("Failed to close Kafka writer:", err)
 	}
-} 
+}

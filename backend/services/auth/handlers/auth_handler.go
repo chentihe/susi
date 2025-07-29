@@ -5,12 +5,12 @@ import (
 	"encoding/base64"
 	"net/http"
 	"time"
+
 	"github.com/gin-gonic/gin"
-	"github.com/tihe/susi/backend/models"
-	"github.com/tihe/susi/backend/events"
-	"github.com/tihe/susi/backend/auth"
+	"github.com/tihe/susi-auth-service/models"
+	"github.com/tihe/susi-auth-service/services"
+	"github.com/tihe/susi-shared/events"
 	"golang.org/x/crypto/bcrypt"
-	"github.com/pquerna/otp/totp"
 	"gorm.io/gorm"
 )
 
@@ -21,10 +21,23 @@ type AuthHandler struct {
 }
 
 func NewAuthHandler(db *gorm.DB, producer *events.KafkaProducer, adminService services.AdminService) *AuthHandler {
-	return &AuthHandler{DB: db, KafkaProducer: producer, AdminService: adminService}
+	return &AuthHandler{
+		DB:            db,
+		KafkaProducer: producer,
+		AdminService:  adminService,
+	}
 }
 
 func generateRefreshToken() (string, error) {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+func generateResetToken() (string, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
@@ -43,7 +56,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	secret, err := auth.GenerateTOTPSecret(req.Username)
+	secret, err := services.GenerateTOTPSecret(req.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate TOTP secret"})
 		return
@@ -94,11 +107,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password"})
 		return
 	}
-	if !totp.ValidateCustom(req.TOTP, admin.TOTPSecret, time.Now(), totp.ValidateOpts{Period: 30, Skew: 0}) {
+	if !services.ValidateTOTP(req.TOTP, admin.TOTPSecret) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid TOTP code"})
 		return
 	}
-	token, err := auth.GenerateJWT(admin.Username)
+	token, err := services.GenerateJWT(admin.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create token"})
 		return
@@ -169,7 +182,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		Secure:   true,
 		Path:     "/",
 	})
-	token, err := auth.GenerateJWT(admin.Username)
+	token, err := services.GenerateJWT(admin.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create token"})
 		return
@@ -195,70 +208,84 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 }
 
 func (h *AuthHandler) ForgotPassword(c *gin.Context) {
-    var req struct {
-        Email string `json:"email"`
-    }
-    if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-        return
-    }
-    var admin models.Admin
-    if err := h.DB.Where("email = ?", req.Email).First(&admin).Error; err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "Email not found"})
-        return
-    }
-    token, err := generateResetToken()
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate reset token"})
-        return
-    }
-    expiresAt := time.Now().Add(1 * time.Hour)
-    resetToken := PasswordResetToken{
-        AdminID:   admin.ID,
-        Token:     token,
-        ExpiresAt: expiresAt,
-        CreatedAt: time.Now(),
-        UpdatedAt: time.Now(),
-    }
-    if err := h.DB.Create(&resetToken).Error; err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store reset token"})
-        return
-    }
-    // In a real app, email the token to the user
-    c.JSON(http.StatusOK, gin.H{"reset_token": token})
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	var admin models.Admin
+	if err := h.DB.Where("email = ?", req.Email).First(&admin).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Email not found"})
+		return
+	}
+	token, err := generateResetToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate reset token"})
+		return
+	}
+	expiresAt := time.Now().Add(1 * time.Hour)
+	resetToken := models.PasswordResetToken{
+		AdminID:   admin.ID,
+		Token:     token,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := h.DB.Create(&resetToken).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store reset token"})
+		return
+	}
+	// In a real app, email the token to the user
+	c.JSON(http.StatusOK, gin.H{"reset_token": token})
 }
 
 func (h *AuthHandler) ResetPassword(c *gin.Context) {
-    var req struct {
-        Token       string `json:"token"`
-        NewPassword string `json:"new_password"`
-    }
-    if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-        return
-    }
-    var resetToken PasswordResetToken
-    if err := h.DB.Where("token = ? AND expires_at > ?", req.Token, time.Now()).First(&resetToken).Error; err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired reset token"})
-        return
-    }
-    var admin models.Admin
-    if err := h.DB.First(&admin, resetToken.AdminID).Error; err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-        return
-    }
-    hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
-        return
-    }
-    if err := h.DB.Model(&admin).Update("password_hash", string(hash)).Error; err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
-        return
-    }
-    // Invalidate the reset token
-    h.DB.Delete(&resetToken)
-    c.JSON(http.StatusOK, gin.H{"message": "Password reset successful"})
+	var req struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	var resetToken models.PasswordResetToken
+	if err := h.DB.Where("token = ? AND expires_at > ?", req.Token, time.Now()).First(&resetToken).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired reset token"})
+		return
+	}
+	var admin models.Admin
+	if err := h.DB.First(&admin, resetToken.AdminID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+	if err := h.DB.Model(&admin).Update("password_hash", string(hash)).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+		return
+	}
+	// Invalidate the reset token
+	h.DB.Delete(&resetToken)
+	c.JSON(http.StatusOK, gin.H{"message": "Password reset successful"})
+}
+
+func (h *AuthHandler) ValidateJWT(c *gin.Context) {
+	token := c.GetHeader("Authorization")
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing token"})
+		return
+	}
+	claims, err := services.ValidateJWT(token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"username": claims.Username, "exp": claims.ExpiresAt})
 }
 
 func RegisterAuthRoutes(rg *gin.RouterGroup, handler *AuthHandler) {
@@ -268,4 +295,5 @@ func RegisterAuthRoutes(rg *gin.RouterGroup, handler *AuthHandler) {
 	rg.POST("/auth/logout", handler.Logout)
 	rg.POST("/auth/forgot-password", handler.ForgotPassword)
 	rg.POST("/auth/reset-password", handler.ResetPassword)
-} 
+	rg.POST("/auth/validate", handler.ValidateJWT)
+}

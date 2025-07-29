@@ -13,7 +13,10 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/tihe/susi-auth-service/handlers"
+	"github.com/tihe/susi-auth-service/models"
+	"github.com/tihe/susi-auth-service/services"
+	"github.com/tihe/susi-shared/events"
 )
 
 func main() {
@@ -24,12 +27,13 @@ func main() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	// Kafka producer
-	producer := &kafka.Writer{
-		Addr:     kafka.TCP("localhost:9092"),
-		Topic:    "auth-events",
-		Balancer: &kafka.LeastBytes{},
+	// Kafka producer using shared module
+	kafkaConfig := events.KafkaConfig{
+		Brokers: []string{"localhost:9092"},
+		Topic:   "auth-events",
 	}
+	producer := events.NewKafkaProducer(kafkaConfig)
+	defer producer.Close()
 
 	// Initialize repositories
 	adminRepo := models.NewAdminImpl(db)
@@ -39,13 +43,13 @@ func main() {
 
 	// Setup router
 	router := gin.Default()
-	
+
 	// API versioning
 	apiV1 := router.Group("/api/v1")
-	
+
 	// Auth routes (public)
-	authHandler := handlers.NewAuthHandler(adminService)
-	authHandler.RegisterAuthRoutes(apiV1)
+	authHandler := handlers.NewAuthHandler(db, producer, adminService)
+	handlers.RegisterAuthRoutes(apiV1, authHandler)
 
 	// Graceful shutdown setup
 	srv := &http.Server{
@@ -73,4 +77,4 @@ func main() {
 		log.Fatal("Server forced to shutdown:", err)
 	}
 	log.Println("Auth service exiting")
-} 
+}

@@ -1,8 +1,7 @@
-package auth
+package services
 
 import (
 	"github.com/pquerna/otp/totp"
-	"github.com/pquerna/otp"
 )
 
 func GenerateTOTPSecret(username string) (string, error) {
