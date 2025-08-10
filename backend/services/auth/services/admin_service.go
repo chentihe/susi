@@ -30,7 +30,7 @@ func (s *AdminServiceImpl) CreateAdmin(admin *models.Admin) error {
 		return err
 	}
 	event := events.Event{
-		Type:      "AdminCreated",
+		Type:      "AdminRegistered",
 		Payload:   admin,
 		Timestamp: time.Now(),
 	}

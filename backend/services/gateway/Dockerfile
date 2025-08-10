@@ -5,8 +5,8 @@ WORKDIR /app
 # Copy the entire backend directory
 COPY . .
 
-# Change to the tenant service directory
-WORKDIR /app/services/tenant
+# Change to the gateway service directory
+WORKDIR /app/services/gateway
 
 # Download dependencies (the replace directive should work now)
 RUN go mod download
@@ -22,10 +22,10 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 
 # Copy the binary from builder stage
-COPY --from=builder /app/services/tenant/main .
+COPY --from=builder /app/services/gateway/main .
 
 # Expose port
-EXPOSE 8083
+EXPOSE 8080
 
 # Run the binary
 CMD ["./main"] 

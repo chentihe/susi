@@ -5,13 +5,23 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tihe/susi-shared/eureka"
 )
 
-func JWTAuthMiddleware(authServiceURL string) gin.HandlerFunc {
+func JWTAuthMiddleware(eurekaServerURL string) gin.HandlerFunc {
+	eurekaClient := eureka.NewEurekaClient(eurekaServerURL)
+
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
 		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Missing authorization token"})
+			return
+		}
+
+		// Get auth service URL from Eureka with health check
+		authServiceURL, err := eurekaClient.GetServiceURLWithHealthCheck("auth-service")
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadGateway, gin.H{"error": "Auth service unavailable"})
 			return
 		}
 

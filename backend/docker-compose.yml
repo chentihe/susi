@@ -1,13 +1,23 @@
 version: '3.8'
 
 services:
+  # Eureka Service Discovery
+  eureka-server:
+    image: springcloud/eureka:latest
+    ports:
+      - "8761:8761"
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+    networks:
+      - susi-network
+
   # PostgreSQL Database
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: susi
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -15,133 +25,144 @@ services:
     networks:
       - susi-network
 
-  # Kafka
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - susi-network
-
+  # Kafka (KRaft Mode - No Zookeeper Required)
   kafka:
     image: confluentinc/cp-kafka:7.4.0
-    depends_on:
-      - zookeeper
     ports:
       - "9092:9092"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
     networks:
       - susi-network
 
   # Auth Service
   auth-service:
     build:
-      context: ./services/auth
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/auth/Dockerfile
     ports:
-      - "8081:8081"
+      - "${AUTH_SERVICE_PORT}:${AUTH_SERVICE_PORT}"
     environment:
       DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: susi
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      KAFKA_BROKERS: kafka:9092
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
+      SERVICE_NAME: ${AUTH_SERVICE_NAME}
+      SERVICE_PORT: ${AUTH_SERVICE_PORT}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     depends_on:
       - postgres
       - kafka
+      - eureka-server
     networks:
       - susi-network
 
-  # Property Service
-  property-service:
-    build:
-      context: ./services/property
-      dockerfile: Dockerfile
-    ports:
-      - "8082:8082"
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: susi
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      KAFKA_BROKERS: kafka:9092
-    depends_on:
-      - postgres
-      - kafka
-    networks:
-      - susi-network
+  # # Property Service
+  # property-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./services/property/Dockerfile
+  #   ports:
+  #     - "${PROPERTY_SERVICE_PORT}:${PROPERTY_SERVICE_PORT}"
+  #   environment:
+  #     DB_HOST: postgres
+  #     DB_PORT: ${DB_PORT}
+  #     DB_NAME: ${DB_NAME}
+  #     DB_USER: ${DB_USER}
+  #     DB_PASSWORD: ${DB_PASSWORD}
+  #     KAFKA_BROKERS: ${KAFKA_BROKERS}
+  #     EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
+  #     SERVICE_NAME: ${PROPERTY_SERVICE_NAME}
+  #     SERVICE_PORT: ${PROPERTY_SERVICE_PORT}
+  #   depends_on:
+  #     - postgres
+  #     - kafka
+  #     - eureka-server
+  #   networks:
+  #     - susi-network
 
-  # Tenant Service
-  tenant-service:
-    build:
-      context: ./services/tenant
-      dockerfile: Dockerfile
-    ports:
-      - "8083:8083"
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: susi
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      KAFKA_BROKERS: kafka:9092
-    depends_on:
-      - postgres
-      - kafka
-    networks:
-      - susi-network
+  # # Tenant Service
+  # tenant-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./services/tenant/Dockerfile
+  #   ports:
+  #     - "${TENANT_SERVICE_PORT}:${TENANT_SERVICE_PORT}"
+  #   environment:
+  #     DB_HOST: postgres
+  #     DB_PORT: ${DB_PORT}
+  #     DB_NAME: ${DB_NAME}
+  #     DB_USER: ${DB_USER}
+  #     DB_PASSWORD: ${DB_PASSWORD}
+  #     KAFKA_BROKERS: ${KAFKA_BROKERS}
+  #     EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
+  #     SERVICE_NAME: ${TENANT_SERVICE_NAME}
+  #     SERVICE_PORT: ${TENANT_SERVICE_PORT}
+  #   depends_on:
+  #     - postgres
+  #     - kafka
+  #     - eureka-server
+  #   networks:
+  #     - susi-network
 
-  # Renovation Service
-  renovation-service:
-    build:
-      context: ./services/renovation
-      dockerfile: Dockerfile
-    ports:
-      - "8084:8084"
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: susi
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      KAFKA_BROKERS: kafka:9092
-    depends_on:
-      - postgres
-      - kafka
-    networks:
-      - susi-network
+  # # Renovation Service
+  # renovation-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./services/renovation/Dockerfile
+  #   ports:
+  #     - "${RENOVATION_SERVICE_PORT}:${RENOVATION_SERVICE_PORT}"
+  #   environment:
+  #     DB_HOST: postgres
+  #     DB_PORT: ${DB_PORT}
+  #     DB_NAME: ${DB_NAME}
+  #     DB_USER: ${DB_USER}
+  #     DB_PASSWORD: ${DB_PASSWORD}
+  #     KAFKA_BROKERS: ${KAFKA_BROKERS}
+  #     EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
+  #     SERVICE_NAME: ${RENOVATION_SERVICE_NAME}
+  #     SERVICE_PORT: ${RENOVATION_SERVICE_PORT}
+  #   depends_on:
+  #     - postgres
+  #     - kafka
+  #     - eureka-server
+  #   networks:
+  #     - susi-network
 
   # API Gateway (Optional)
   api-gateway:
     build:
-      context: ./gateway
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/gateway/Dockerfile
     ports:
-      - "8080:8080"
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     environment:
-      AUTH_SERVICE_URL: http://auth-service:8081
-      PROPERTY_SERVICE_URL: http://property-service:8082
-      TENANT_SERVICE_URL: http://tenant-service:8083
-      RENOVATION_SERVICE_URL: http://renovation-service:8084
+      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
     depends_on:
-      - auth-service
-      - property-service
-      - tenant-service
-      - renovation-service
+      - eureka-server
     networks:
       - susi-network
 
 volumes:
   postgres_data:
+  kafka_data:
 
 networks:
   susi-network:

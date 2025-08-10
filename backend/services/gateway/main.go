@@ -8,9 +8,33 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tihe/susi-gateway/middleware"
+	"github.com/tihe/susi-shared/eureka"
 )
 
-func proxyRequest(c *gin.Context, targetBase string) {
+type ServiceDiscovery struct {
+	eurekaClient *eureka.EurekaClient
+}
+
+func NewServiceDiscovery(eurekaServerURL string) *ServiceDiscovery {
+	return &ServiceDiscovery{
+		eurekaClient: eureka.NewEurekaClient(eurekaServerURL),
+	}
+}
+
+func (sd *ServiceDiscovery) GetServiceURL(serviceName string) (string, error) {
+	// Use health check when getting service URL
+	return sd.eurekaClient.GetServiceURLWithHealthCheck(serviceName)
+}
+
+func proxyRequest(c *gin.Context, serviceDiscovery *ServiceDiscovery, serviceName string) {
+	// Get service URL from Eureka
+	targetBase, err := serviceDiscovery.GetServiceURL(serviceName)
+	if err != nil {
+		log.Printf("Failed to get service URL for %s: %v", serviceName, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service unavailable"})
+		return
+	}
+
 	// Build the target URL
 	targetURL := targetBase + c.Request.URL.Path
 	if c.Request.URL.RawQuery != "" {
@@ -23,6 +47,7 @@ func proxyRequest(c *gin.Context, targetBase string) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create proxy request"})
 		return
 	}
+
 	// Copy headers
 	for k, v := range c.Request.Header {
 		req.Header[k] = v
@@ -31,6 +56,7 @@ func proxyRequest(c *gin.Context, targetBase string) {
 	// Do the request
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		log.Printf("Failed to proxy request to %s: %v", serviceName, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Service unavailable"})
 		return
 	}
@@ -47,40 +73,42 @@ func proxyRequest(c *gin.Context, targetBase string) {
 func main() {
 	r := gin.Default()
 
-	authURL := os.Getenv("AUTH_SERVICE_URL")
-	propertyURL := os.Getenv("PROPERTY_SERVICE_URL")
-	tenantURL := os.Getenv("TENANT_SERVICE_URL")
-	renovationURL := os.Getenv("RENOVATION_SERVICE_URL")
+	eurekaServerURL := os.Getenv("EUREKA_SERVER_URL")
+	if eurekaServerURL == "" {
+		eurekaServerURL = "http://localhost:8761/eureka/"
+	}
+
+	serviceDiscovery := NewServiceDiscovery(eurekaServerURL)
 
 	// Public routes (no JWT validation required)
 	// Auth routes
 	r.Any("/api/v1/auth/*proxyPath", func(c *gin.Context) {
-		proxyRequest(c, authURL)
+		proxyRequest(c, serviceDiscovery, "auth-service")
 	})
 
 	// Protected routes (JWT validation required)
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.JWTAuthMiddleware(authURL))
+	protected.Use(middleware.JWTAuthMiddleware(eurekaServerURL))
 
 	// Property routes
 	protected.Any("/properties/*proxyPath", func(c *gin.Context) {
-		proxyRequest(c, propertyURL)
+		proxyRequest(c, serviceDiscovery, "property-service")
 	})
 	// Room routes
 	protected.Any("/rooms/*proxyPath", func(c *gin.Context) {
-		proxyRequest(c, propertyURL)
+		proxyRequest(c, serviceDiscovery, "property-service")
 	})
 	// Landlord routes
 	protected.Any("/landlords/*proxyPath", func(c *gin.Context) {
-		proxyRequest(c, propertyURL)
+		proxyRequest(c, serviceDiscovery, "property-service")
 	})
 	// Tenant routes
 	protected.Any("/tenants/*proxyPath", func(c *gin.Context) {
-		proxyRequest(c, tenantURL)
+		proxyRequest(c, serviceDiscovery, "tenant-service")
 	})
 	// Renovation routes
 	protected.Any("/renovations/*proxyPath", func(c *gin.Context) {
-		proxyRequest(c, renovationURL)
+		proxyRequest(c, serviceDiscovery, "renovation-service")
 	})
 
 	// Health check

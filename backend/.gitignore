@@ -1,0 +1,40 @@
+# Environment variables
+.env
+.env.local
+.env.production
+.env.staging
+
+# JWT keys and secrets
+*.key
+*.pem
+*.crt
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Build artifacts
+bin/
+dist/
+build/
+
+# Docker
+.dockerignore 

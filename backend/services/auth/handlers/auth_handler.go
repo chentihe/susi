@@ -9,22 +9,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tihe/susi-auth-service/models"
 	"github.com/tihe/susi-auth-service/services"
-	"github.com/tihe/susi-shared/events"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 type AuthHandler struct {
-	DB            *gorm.DB
-	KafkaProducer *events.KafkaProducer
-	AdminService  services.AdminService
+	DB           *gorm.DB
+	AdminService services.AdminService
 }
 
-func NewAuthHandler(db *gorm.DB, producer *events.KafkaProducer, adminService services.AdminService) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, adminService services.AdminService) *AuthHandler {
 	return &AuthHandler{
-		DB:            db,
-		KafkaProducer: producer,
-		AdminService:  adminService,
+		DB:           db,
+		AdminService: adminService,
 	}
 }
 
@@ -77,13 +74,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if err := h.AdminService.CreateAdmin(&admin); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
-	}
-	if h.KafkaProducer != nil {
-		h.KafkaProducer.Publish(events.Event{
-			Type:      "AdminRegistered",
-			Payload:   admin,
-			Timestamp: time.Now(),
-		})
 	}
 	c.JSON(http.StatusOK, gin.H{"totp_secret": secret})
 }
