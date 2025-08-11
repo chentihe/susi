@@ -8,25 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tihe/susi-gateway/middleware"
-	"github.com/tihe/susi-shared/eureka"
+	"github.com/tihe/susi-shared/discovery"
+	"github.com/tihe/susi-shared/discovery/consul"
 )
 
-type ServiceDiscovery struct {
-	eurekaClient *eureka.EurekaClient
-}
-
-func NewServiceDiscovery(eurekaServerURL string) *ServiceDiscovery {
-	return &ServiceDiscovery{
-		eurekaClient: eureka.NewEurekaClient(eurekaServerURL),
-	}
-}
-
-func (sd *ServiceDiscovery) GetServiceURL(serviceName string) (string, error) {
-	// Use health check when getting service URL
-	return sd.eurekaClient.GetServiceURLWithHealthCheck(serviceName)
-}
-
-func proxyRequest(c *gin.Context, serviceDiscovery *ServiceDiscovery, serviceName string) {
+func proxyRequest(c *gin.Context, serviceDiscovery discovery.ServiceDiscovery, serviceName string) {
 	// Get service URL from Eureka
 	targetBase, err := serviceDiscovery.GetServiceURL(serviceName)
 	if err != nil {
@@ -73,12 +59,15 @@ func proxyRequest(c *gin.Context, serviceDiscovery *ServiceDiscovery, serviceNam
 func main() {
 	r := gin.Default()
 
-	eurekaServerURL := os.Getenv("EUREKA_SERVER_URL")
-	if eurekaServerURL == "" {
-		eurekaServerURL = "http://localhost:8761/eureka/"
+	consulURL := os.Getenv("CONSUL_SERVER_URL")
+	if consulURL == "" {
+		consulURL = "http://localhost:8500"
 	}
 
-	serviceDiscovery := NewServiceDiscovery(eurekaServerURL)
+	serviceDiscovery, err := consul.NewConsulClient(consulURL)
+	if err != nil {
+		log.Fatalf("Failed to create service discovery: %v", err)
+	}
 
 	// Public routes (no JWT validation required)
 	// Auth routes
@@ -88,7 +77,7 @@ func main() {
 
 	// Protected routes (JWT validation required)
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.JWTAuthMiddleware(eurekaServerURL))
+	protected.Use(middleware.JWTAuthMiddleware(serviceDiscovery))
 
 	// Property routes
 	protected.Any("/properties/*proxyPath", func(c *gin.Context) {

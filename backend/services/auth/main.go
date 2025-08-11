@@ -18,7 +18,7 @@ import (
 	"github.com/tihe/susi-auth-service/handlers"
 	"github.com/tihe/susi-auth-service/models"
 	"github.com/tihe/susi-auth-service/services"
-	"github.com/tihe/susi-shared/eureka"
+	"github.com/tihe/susi-shared/discovery/consul"
 	"github.com/tihe/susi-shared/events"
 )
 
@@ -65,12 +65,12 @@ func main() {
 	producer := events.NewKafkaProducer(kafkaConfig)
 	defer producer.Close()
 
-	// Eureka client
-	eurekaServerURL := os.Getenv("EUREKA_SERVER_URL")
-	if eurekaServerURL == "" {
-		eurekaServerURL = "http://localhost:8761/eureka/"
+	// Consul registration
+	consulURL := os.Getenv("CONSUL_SERVER_URL")
+	consulClient, err := consul.NewConsulClient(consulURL)
+	if err != nil {
+		log.Fatalf("Failed to create Consul client: %v", err)
 	}
-	eurekaClient := eureka.NewEurekaClient(eurekaServerURL)
 
 	// Service configuration
 	serviceName := os.Getenv("SERVICE_NAME")
@@ -100,11 +100,6 @@ func main() {
 	// Setup router
 	router := gin.Default()
 
-	// Health check endpoint for Eureka
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "UP"})
-	})
-
 	// API versioning
 	apiV1 := router.Group("/api/v1")
 
@@ -118,28 +113,34 @@ func main() {
 		Handler: router,
 	}
 
-	// Register with Eureka
+	// Register with Consul
 	hostname := os.Getenv("HOSTNAME")
 	if hostname == "" {
 		hostname = "localhost"
 	}
 
-	if err := eurekaClient.Register(serviceName, hostname, servicePort); err != nil {
-		log.Printf("Failed to register with Eureka: %v", err)
+	serviceId := fmt.Sprintf("%s:%s:%d", serviceName, hostname, servicePort)
+
+	if err := consulClient.Register(serviceName, hostname, servicePort); err != nil {
+		log.Printf("Failed to register with Consul: %v", err)
 	} else {
-		log.Printf("Successfully registered with Eureka as %s", serviceName)
+		log.Printf("Successfully registered with Consul as %s", serviceName)
 	}
 
 	// Start heartbeat goroutine
-	instanceID := fmt.Sprintf("%s:%s:%d", hostname, serviceName, servicePort)
-	heartbeatTicker := time.NewTicker(30 * time.Second)
-	defer heartbeatTicker.Stop()
-
 	go func() {
-		for range heartbeatTicker.C {
-			if err := eurekaClient.Heartbeat(serviceName, instanceID); err != nil {
-				log.Printf("Failed to send heartbeat to Eureka: %v", err)
+		for {
+			if err := consulClient.HealthCheck(serviceId); err != nil {
+				log.Println("Failed to report healthy state: ", err.Error())
 			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
+	defer func() {
+		if err := consulClient.Deregister(serviceName, hostname, servicePort); err != nil {
+			log.Printf("Failed to deregister from Consul: %v", err)
+		} else {
+			log.Println("Successfully deregistered from Consul")
 		}
 	}()
 
@@ -155,13 +156,6 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down auth service...")
-
-	// Deregister from Eureka
-	if err := eurekaClient.Deregister(serviceName, instanceID); err != nil {
-		log.Printf("Failed to deregister from Eureka: %v", err)
-	} else {
-		log.Println("Successfully deregistered from Eureka")
-	}
 
 	// The context is used to inform the server it has 5 seconds to finish
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)

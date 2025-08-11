@@ -1,15 +1,19 @@
 version: '3.8'
 
 services:
-  # Eureka Service Discovery
-  eureka-server:
-    image: springcloud/eureka:latest
-    ports:
-      - "8761:8761"
-    environment:
-      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
-    networks:
-      - susi-network
+  # Consul Service Discovery
+  consul:
+      image: hashicorp/consul:latest
+      ports:
+        - "8500:8500"  # HTTP API and UI
+        - "8600:8600/udp"  # DNS interface
+      command: agent -server -bootstrap-expect=1 -node=consul-server -ui -client=0.0.0.0 -bind=0.0.0.0
+      healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+        interval: 5s
+        retries: 5
+      networks:
+        - susi-network
 
   # PostgreSQL Database
   postgres:
@@ -64,13 +68,17 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
+      CONSUL_SERVER_URL: ${CONSUL_SERVER_URL}
       SERVICE_NAME: ${AUTH_SERVICE_NAME}
       SERVICE_PORT: ${AUTH_SERVICE_PORT}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     depends_on:
-      - postgres
-      - kafka
-      - eureka-server
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+      consul:
+        condition: service_healthy
     networks:
       - susi-network
 
@@ -146,7 +154,7 @@ services:
   #   networks:
   #     - susi-network
 
-  # API Gateway (Optional)
+  # API Gateway
   api-gateway:
     build:
       context: .
@@ -154,9 +162,9 @@ services:
     ports:
       - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     environment:
-      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
+      CONSUL_SERVER_URL: ${CONSUL_SERVER_URL}
     depends_on:
-      - eureka-server
+      - consul
     networks:
       - susi-network
 
