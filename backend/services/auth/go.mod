@@ -9,6 +9,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/pquerna/otp v1.5.0
 	github.com/tihe/susi-shared v0.0.0
+	github.com/tihe/susi-proto v0.0.0
 	golang.org/x/crypto v0.40.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.30.1
@@ -16,6 +17,7 @@ require (
 
 // Use local shared module for development
 replace github.com/tihe/susi-shared => ../../shared
+replace github.com/tihe/susi-proto => ../../proto
 
 require (
 	github.com/armon/go-metrics v0.4.1 // indirect
