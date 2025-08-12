@@ -1,0 +1,169 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "../auth";
+
+import "google/protobuf/timestamp.proto";
+
+service AuthService {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+    rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+    rpc Logout(LogoutRequest) returns (LogoutResponse);
+
+    // Admin specific operations
+    rpc CreateAdmin(CreateAdminRequest) returns (CreateAdminResponse);
+    rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+    rpc UpdateUserRole(UpdateUserRoleRequest) returns (UpdateUserRoleResponse);
+    rpc DeactivateUser(DeactivateUserRequest) returns (DeactivateUserResponse);
+}
+
+enum UserRole {
+    USER = 0;
+    ADMIN = 1;
+    SUPER_ADMIN = 2;
+}
+
+enum UserStatus {
+    ACTIVE = 0;
+    INACTIVE = 1;
+    SUSPENDED = 2;
+}
+
+message RegisterRequest {
+    string email = 1;
+    string password = 2;
+    string name = 3;
+    string phone = 4;
+    UserRole role = 5;
+}
+
+message RegisterResponse {
+    int32 user_id = 1;
+    string email = 2;
+    string name = 3;
+    UserRole role = 4;
+    UserStatus staus = 5;
+    string access_token = 6;
+    string refresh_token = 7;
+    google.protobuf.Timestamp expires_at = 8;
+    string message = 9;
+}
+
+message LoginRequest {
+    string email = 1;
+    string password = 2;
+    UserRole expected_role = 3; //Optional: specify if admin login expected
+}
+
+message LoginResponse {
+    int32 user_id = 1;
+    string email = 2;
+    string name = 3;
+    UserRole role = 4;
+    UserStatus status = 5;
+    repeated string permissions = 6;
+    string access_token = 7;
+    string refresh_token = 8;
+    google.protobuf.Timestamp expires_at = 9;
+    string message = 10;
+}
+
+message RefreshTokenRequest {
+    string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+    google.protobuf.Timestamp expires_at = 3;
+}
+
+message ValidateTokenRequest {
+    string token = 1;
+    repeated string required_permissions = 2; // Optional: check specific permissions
+}
+
+message ValidateTokenResponse {
+    bool valid = 1;
+    int32 user_id = 2;
+    string email = 3;
+    UserRole role = 4;
+    UserStatus status = 5;
+    repeated string permissions = 6;
+    google.protobuf.Timestamp expires_at = 7;
+}
+
+message LogoutRequest {
+    string token = 1;
+}
+
+message LogoutResponse {
+    string message = 1;
+}
+
+// Admin-specific messages
+message CreateAdminRequest {
+    string email = 1;
+    string password = 2;
+    string name = 3;
+    string phone = 4;
+    UserRole role = 5; // ADMIN or SUPER_ADMIN
+    string created_by = 6; // Admin ID who creates this admin
+}
+
+message CreateAdminResponse {
+    int32 admin_id = 1;
+    string email = 2;
+    string name = 3;
+    UserRole role = 4;
+    string message = 5;
+}
+
+message ListUsersRequest {
+    int32 page = 1;
+    int32 limit = 2;
+    UserRole role_filter = 3; // Optional: filter by role
+    UserStatus status_filter = 4; // Optional: filter by status
+}
+
+message ListUsersResponse {
+    repeated UserInfo users = 1;
+    int32 total = 2;
+    int32 page = 3;
+    int32 limit = 4;
+}
+
+message UserInfo {
+    int32 user_id = 1;
+    string email = 2;
+    string name = 3;
+    string phone = 4;
+    UserRole role = 5;
+    UserStatus status = 6;
+    google.protobuf.Timestamp created_at = 7;
+    google.protobuf.Timestamp last_login = 8;
+}
+
+message UpdateUserRoleRequest {
+    int32 user_id = 1;
+    UserRole new_role = 2;
+    string updated_by = 3; // Admin ID who updates
+}
+
+message UpdateUserRoleResponse {
+    string message = 1;
+}
+
+message DeactivateUserRequest {
+    int32 user_id = 1;
+    UserStatus new_status = 2; // INACTIVE or SUSPENDED
+    string reason = 3;
+    string updated_by = 4;
+}
+
+message DeactivateUserResponse {
+    string message = 1;
+}

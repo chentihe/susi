@@ -1,24 +1,21 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
-	"time"
 
-	"github.com/gin-gonic/gin"
+	"go-micro.dev/v5"
+	"go-micro.dev/v5/registry"
+	registryConsul "go-micro.dev/v5/registry/consul"
+	"go-micro.dev/v5/transport/grpc"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/tihe/susi-auth-service/handlers"
-	"github.com/tihe/susi-auth-service/models"
-	"github.com/tihe/susi-auth-service/services"
-	"github.com/tihe/susi-shared/discovery/consul"
+	"github.com/tihe/susi-auth-service/internal/handler"
+	"github.com/tihe/susi-auth-service/internal/repository"
+	"github.com/tihe/susi-auth-service/internal/service"
+	"github.com/tihe/susi-proto/admin"
 	"github.com/tihe/susi-shared/events"
 )
 
@@ -67,101 +64,44 @@ func main() {
 
 	// Consul registration
 	consulURL := os.Getenv("CONSUL_SERVER_URL")
-	consulClient, err := consul.NewConsulClient(consulURL)
-	if err != nil {
-		log.Fatalf("Failed to create Consul client: %v", err)
-	}
 
 	// Service configuration
 	serviceName := os.Getenv("SERVICE_NAME")
 	if serviceName == "" {
 		serviceName = "auth-service"
 	}
-	servicePortStr := os.Getenv("SERVICE_PORT")
-	if servicePortStr == "" {
-		servicePortStr = "8081"
-	}
-	servicePort, err := strconv.Atoi(servicePortStr)
-	if err != nil {
-		log.Fatal("Invalid service port:", err)
-	}
 
 	// Initialize JWT key
-	if err := services.InitJWTKey(); err != nil {
+	if err := service.InitJWTKey(); err != nil {
 		log.Fatal("Failed to initialize JWT key:", err)
 	}
 
 	// Initialize repositories
-	adminRepo := models.NewAdminImpl(db)
+	adminRepo := repository.NewAdminRepository(db)
 
 	// Initialize services
-	adminService := services.NewAdminService(adminRepo, producer)
-
-	// Setup router
-	router := gin.Default()
-
-	// API versioning
-	apiV1 := router.Group("/api/v1")
+	adminService := service.NewAdminService(adminRepo, producer)
 
 	// Auth routes (public)
-	authHandler := handlers.NewAuthHandler(db, adminService)
-	handlers.RegisterAuthRoutes(apiV1, authHandler)
+	adminHandler := handler.NewAdminHandler(adminService)
 
 	// Graceful shutdown setup
-	srv := &http.Server{
-		Addr:    ":" + servicePortStr,
-		Handler: router,
+	service := micro.NewService(
+		micro.Name(serviceName),
+		micro.Registry(registryConsul.NewConsulRegistry(registry.Addrs(consulURL))),
+		micro.Transport(grpc.NewTransport()),
+		micro.AfterStop(func() error {
+			// TODO: add graceful shutdown process
+			log.Println("Auth service exiting")
+			return nil
+		}),
+	)
+
+	service.Init()
+
+	admin.RegisterAdminServiceHandler(service.Server(), adminHandler)
+
+	if err := service.Run(); err != nil {
+		log.Printf("Error %s: %v", serviceName, err)
 	}
-
-	// Register with Consul
-	hostname := os.Getenv("HOSTNAME")
-	if hostname == "" {
-		hostname = "localhost"
-	}
-
-	serviceId := fmt.Sprintf("%s:%s:%d", serviceName, hostname, servicePort)
-
-	if err := consulClient.Register(serviceName, hostname, servicePort); err != nil {
-		log.Printf("Failed to register with Consul: %v", err)
-	} else {
-		log.Printf("Successfully registered with Consul as %s", serviceName)
-	}
-
-	// Start heartbeat goroutine
-	go func() {
-		for {
-			if err := consulClient.HealthCheck(serviceId); err != nil {
-				log.Println("Failed to report healthy state: ", err.Error())
-			}
-			time.Sleep(1 * time.Second)
-		}
-	}()
-	defer func() {
-		if err := consulClient.Deregister(serviceName, hostname, servicePort); err != nil {
-			log.Printf("Failed to deregister from Consul: %v", err)
-		} else {
-			log.Println("Successfully deregistered from Consul")
-		}
-	}()
-
-	// Start server in goroutine
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %s\n", err)
-		}
-	}()
-
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down auth service...")
-
-	// The context is used to inform the server it has 5 seconds to finish
-	ctxTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctxTimeout); err != nil {
-		log.Fatal("Server forced to shutdown:", err)
-	}
-	log.Println("Auth service exiting")
 }

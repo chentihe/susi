@@ -8,32 +8,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tihe/susi-gateway/middleware"
-	"github.com/tihe/susi-shared/discovery"
-	"github.com/tihe/susi-shared/discovery/consul"
+	"github.com/tihe/susi-proto/admin"
+	"go-micro.dev/v5"
+	"go-micro.dev/v5/registry"
+	"go-micro.dev/v5/registry/consul"
+	"go-micro.dev/v5/transport/grpc"
 )
 
-func proxyRequest(c *gin.Context, serviceDiscovery discovery.ServiceDiscovery, serviceName string) {
-	// Get service URL from Eureka
-	targetBase, err := serviceDiscovery.GetServiceURL(serviceName)
-	if err != nil {
-		log.Printf("Failed to get service URL for %s: %v", serviceName, err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service unavailable"})
-		return
-	}
-
-	// Build the target URL
-	targetURL := targetBase + c.Request.URL.Path
-	if c.Request.URL.RawQuery != "" {
-		targetURL += "?" + c.Request.URL.RawQuery
-	}
-
-	// Create the new request
-	req, err := http.NewRequest(c.Request.Method, targetURL, c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create proxy request"})
-		return
-	}
-
+func proxyRequest(c *gin.Context, serviceDiscovery registry.Registry) {
 	// Copy headers
 	for k, v := range c.Request.Header {
 		req.Header[k] = v
@@ -64,20 +46,36 @@ func main() {
 		consulURL = "http://localhost:8500"
 	}
 
-	serviceDiscovery, err := consul.NewConsulClient(consulURL)
-	if err != nil {
-		log.Fatalf("Failed to create service discovery: %v", err)
+	// TODO: wrap a func to init all client
+	authServiceName := os.Getenv("AUTH_SERVICE_NAME")
+	if authServiceName == "" {
+		authServiceName = "auth-service"
 	}
+
+	service := micro.NewService(
+		micro.Name(authServiceName),
+		micro.Registry(consul.NewConsulRegistry(registry.Addrs(consulURL))),
+		micro.Transport(grpc.NewTransport()),
+		micro.AfterStop(func() error {
+			// TODO: add graceful shutdown process
+			log.Println("api gateway exiting")
+			return nil
+		}),
+	)
+
+	service.Init()
+
+	adminClient := admin.NewAdminService(authServiceName, service.Client())
 
 	// Public routes (no JWT validation required)
 	// Auth routes
 	r.Any("/api/v1/auth/*proxyPath", func(c *gin.Context) {
-		proxyRequest(c, serviceDiscovery, "auth-service")
+		proxyRequest(c, adminClient)
 	})
 
 	// Protected routes (JWT validation required)
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.JWTAuthMiddleware(serviceDiscovery))
+	protected.Use(middleware.JWTAuthMiddleware(adminClient))
 
 	// Property routes
 	protected.Any("/properties/*proxyPath", func(c *gin.Context) {
