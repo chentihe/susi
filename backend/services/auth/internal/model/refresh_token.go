@@ -1,4 +1,4 @@
-package models
+package model
 
 import "time"
 
@@ -9,4 +9,4 @@ type RefreshToken struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-} 
+}

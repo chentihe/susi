@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package admin;
+
+option go_package = "../admin";
+
+import "google/protobuf/timestamp.proto";
+
+service AdminService {
+    rpc CreateAdmin(CreateAdminRequest) returns (CreateAdminResponse);
+    rpc GetAdmin(GetAdminRequest) returns (GetAdminResponse);
+    rpc UpdateAdmin(UpdateAdminRequest) returns (UpdateAdminResponse);
+    rpc DeleteAdmin(DeleteAdminRequest) returns (DeleteAdminResponse);
+    rpc ListAdmins(ListAdminsRequest) returns (ListAdminsResponse);
+}
+
+message Admin {
+    string id = 1;
+    string name = 2;
+    string email = 3;
+    string password = 4;
+    string totp_secret = 5;
+    google.protobuf.Timestamp created_at = 6;
+    google.protobuf.Timestamp updated_at = 7;
+}
+
+message CreateAdminRequest {
+    string name = 1;
+    string email = 2;
+    string password = 3;
+}
+
+message CreateAdminResponse {
+    Admin admin = 1;
+    string message = 2;
+}
+
+message GetAdminRequest {
+    string id = 1;
+}
+
+message GetAdminResponse {
+    Admin admin = 1;
+}
+
+message UpdateAdminRequest {
+    string id = 1;
+    string name = 2;
+    string email = 3;
+    string password = 4;
+}
+
+message UpdateAdminResponse {
+    Admin admin = 1;
+    string message = 2;
+}
+
+message DeleteAdminRequest {
+    string id = 1;
+}
+
+message DeleteAdminResponse {
+    string message = 1;
+}
+
+message ListAdminsRequest {
+    int32 page = 1;
+    int32 limit = 2;
+}
+
+message ListAdminsResponse {
+    repeated Admin admins = 1;
+    int32 total = 2;
+    int32 page = 3;
+    int32 limit = 4;
+}
