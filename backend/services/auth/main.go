@@ -7,7 +7,7 @@ import (
 
 	"go-micro.dev/v5"
 	"go-micro.dev/v5/registry"
-	registryConsul "go-micro.dev/v5/registry/consul"
+	"go-micro.dev/v5/registry/consul"
 	"go-micro.dev/v5/transport/grpc"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -15,7 +15,7 @@ import (
 	"github.com/tihe/susi-auth-service/internal/handler"
 	"github.com/tihe/susi-auth-service/internal/repository"
 	"github.com/tihe/susi-auth-service/internal/service"
-	"github.com/tihe/susi-proto/admin"
+	"github.com/tihe/susi-proto/auth"
 	"github.com/tihe/susi-shared/events"
 )
 
@@ -77,18 +77,19 @@ func main() {
 	}
 
 	// Initialize repositories
-	adminRepo := repository.NewAdminRepository(db)
+	userRepo := repository.NewUserRepository(db)
+	refreshTokenRepo := repository.NewRefreshTokenRepository(db)
 
 	// Initialize services
-	adminService := service.NewAdminService(adminRepo, producer)
+	authService := service.NewAuthService(userRepo, refreshTokenRepo, producer)
 
 	// Auth routes (public)
-	adminHandler := handler.NewAdminHandler(adminService)
+	authHanlder := handler.NewAuthHandler(authService)
 
 	// Graceful shutdown setup
 	service := micro.NewService(
 		micro.Name(serviceName),
-		micro.Registry(registryConsul.NewConsulRegistry(registry.Addrs(consulURL))),
+		micro.Registry(consul.NewConsulRegistry(registry.Addrs(consulURL))),
 		micro.Transport(grpc.NewTransport()),
 		micro.AfterStop(func() error {
 			// TODO: add graceful shutdown process
@@ -99,7 +100,7 @@ func main() {
 
 	service.Init()
 
-	admin.RegisterAdminServiceHandler(service.Server(), adminHandler)
+	auth.RegisterAuthServiceHandler(service.Server(), authHanlder)
 
 	if err := service.Run(); err != nil {
 		log.Printf("Error %s: %v", serviceName, err)

@@ -53,7 +53,7 @@ type authService struct {
 	kafkaProducer    *events.KafkaProducer
 }
 
-func NewAdminService(userRepo repository.UserRepository, refreshTokenRepo repository.RefreshTokenRepository, producer *events.KafkaProducer) AuthService {
+func NewAuthService(userRepo repository.UserRepository, refreshTokenRepo repository.RefreshTokenRepository, producer *events.KafkaProducer) AuthService {
 	return &authService{
 		userRepo:         userRepo,
 		refreshTokenRepo: refreshTokenRepo,

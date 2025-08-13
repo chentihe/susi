@@ -5,8 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"log"
-	"strings"
-	"time"
+	"strconv"
 
 	"github.com/tihe/susi-auth-service/internal/model"
 	"github.com/tihe/susi-auth-service/internal/service"
@@ -15,12 +14,12 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type AuthServiceHandler struct {
+type AuthHandler struct {
 	authService service.AuthService
 }
 
-func NewAuthServiceHandler(authService service.AuthService) *AuthServiceHandler {
-	return &AuthServiceHandler{
+func NewAuthHandler(authService service.AuthService) *AuthHandler {
+	return &AuthHandler{
 		authService: authService,
 	}
 }
@@ -43,8 +42,10 @@ func generateResetToken() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func (h *AuthServiceHandler) Register(ctx context.Context, req *auth.RegisterRequest, rsp *auth.RegisterResponse) error {
+func (h *AuthHandler) Register(ctx context.Context, req *auth.RegisterRequest, rsp *auth.RegisterResponse) error {
 	log.Printf("Register called with: name=%s, email=%s", req.Name, req.Email)
+
+	role := h.protoRoleToModel(req.Role)
 
 	secret, err := service.GenerateTOTPSecret(req.Name)
 	if err != nil {
@@ -55,6 +56,7 @@ func (h *AuthServiceHandler) Register(ctx context.Context, req *auth.RegisterReq
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("Error generating hash password: %v", err)
+		return err
 	}
 
 	user := model.User{
@@ -63,60 +65,155 @@ func (h *AuthServiceHandler) Register(ctx context.Context, req *auth.RegisterReq
 		Email:      req.Email,
 		TOTPSecret: secret,
 		Phone:      req.Phone,
-		Role:       model.RoleUser,
+		Role:       role,
 		Status:     model.StatusActive,
 	}
 
 	createdUser, err := h.authService.Register(ctx, &user)
 	if err != nil {
-		log.Printf("Error creating user: %v", err)
+		log.Printf("Error registering user: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Registration failed",
+			ErrorCode: "REGISTRATION_ERROR",
+		}
 		return err
 	}
 
-	rsp. = h.modelToProto(createdUser)
-	// TODO: need to refactor proto
-	rsp.Message = "User created successfully"
+	loginResult, err := h.authService.Login(ctx, user.Email, req.Password, nil)
+	if err != nil {
+		log.Printf("Error generating tokens after registration: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Registration successful but token generation failed",
+			ErrorCode: "TOKEN_ERROR",
+		}
+		return err
+	}
 
-	log.Printf("User created successfully: id=%d", admin.ID)
+	rsp.User = h.modelUserToProtoUserInfo(loginResult.User)
+	rsp.Tokens = &auth.TokenInfo{
+		AccessToken:  loginResult.AccessToken,
+		RefreshToken: loginResult.RefreshToken,
+		ExpiresAt:    timestamppb.New(loginResult.ExpiresAt),
+	}
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "User registered successfully",
+	}
+
+	log.Printf("User registered sucessfully; id=%d", createdUser.ID)
 	return nil
 }
 
-func (h *AuthServiceHandler) Login(ctx context.Context, in *LoginRequest, out *LoginResponse) error {
-	return h.AuthServiceHandler.Login(ctx, in, out)
+func (h *AuthHandler) Login(ctx context.Context, req *auth.LoginRequest, rsp *auth.LoginResponse) error {
+	log.Printf("Login called with: email=%s", req.Email)
+
+	var expectedRole *model.UserRole
+	if req.ExpectedRole != auth.UserRole_USER {
+		modelRole := h.protoRoleToModel(req.ExpectedRole)
+		expectedRole = &modelRole
+	}
+
+	loginResult, err := h.authService.Login(ctx, req.Email, req.Password, expectedRole)
+	if err != nil {
+		log.Printf("Error during login: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Login failed",
+			ErrorCode: "LOGIN_ERROR",
+		}
+		return err
+	}
+
+	rsp.User = h.modelUserToProtoUserInfo(loginResult.User)
+	rsp.Tokens = &auth.TokenInfo{
+		AccessToken:  loginResult.AccessToken,
+		RefreshToken: loginResult.RefreshToken,
+		ExpiresAt:    timestamppb.New(loginResult.ExpiresAt),
+	}
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Login successful",
+	}
+
+	return nil
 }
 
-func (h *AuthServiceHandler) RefreshToken(ctx context.Context, in *RefreshTokenRequest, out *RefreshTokenResponse) error {
-	return h.AuthServiceHandler.RefreshToken(ctx, in, out)
+func (h *AuthHandler) RefreshToken(ctx context.Context, req *auth.RefreshTokenRequest, rsp *auth.RefreshTokenResponse) error {
+	log.Printf("RefreshToken called with: token=%v", req.RefreshToken)
+
+	rt, err := h.authService.RefreshToken(ctx, req.RefreshToken)
+	if err != nil {
+		log.Printf("Error during refreshing token: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Refresh token error",
+			ErrorCode: "REFRESH_TOKEN_ERROR",
+		}
+		return nil
+	}
+
+	rsp.Tokens = &auth.TokenInfo{
+		AccessToken:  rt.AccessToken,
+		RefreshToken: rt.RefreshToken,
+		ExpiresAt:    timestamppb.New(rt.ExpiresAt),
+	}
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Refresh token succesful",
+	}
+
+	return nil
 }
 
-func (h *AuthServiceHandler) ValidateToken(ctx context.Context, in *ValidateTokenRequest, out *ValidateTokenResponse) error {
-	return h.AuthServiceHandler.ValidateToken(ctx, in, out)
+func (h *AuthHandler) ValidateToken(ctx context.Context, req *auth.ValidateTokenRequest, rsp *auth.ValidateTokenResponse) error {
+	log.Printf("Validated token called with: token=%s", req.Token)
+
+	vr, err := h.authService.ValidateToken(ctx, req.Token, req.RequiredPermissions)
+	if err != nil {
+		log.Printf("Error validating token: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Validate token error",
+			ErrorCode: "VALIDATE_TOKEN_ERROR",
+		}
+		return err
+	}
+
+	rsp.Valid = vr.Valid
+	rsp.User = h.modelUserToProtoUserInfo(vr.User)
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Validate token successful",
+	}
+
+	return nil
 }
 
-func (h *AuthServiceHandler) Logout(ctx context.Context, in *LogoutRequest, out *LogoutResponse) error {
-	return h.AuthServiceHandler.Logout(ctx, in, out)
+func (h *AuthHandler) Logout(ctx context.Context, req *auth.LogoutRequest, rsp *auth.LogoutResponse) error {
+	log.Printf("Logout called with: token=%s", req.Token)
+
+	if err := h.authService.Logout(ctx, req.Token); err != nil {
+		log.Printf("Error during logout: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Logout error",
+			ErrorCode: "LOGOUT_ERROR",
+		}
+		return err
+	}
+
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Logout successful",
+	}
+
+	return nil
 }
 
-func (h *AuthServiceHandler) CreateAdmin(ctx context.Context, in *CreateAdminRequest, out *CreateAdminResponse) error {
-	return h.AuthServiceHandler.CreateAdmin(ctx, in, out)
-}
-
-func (h *AuthServiceHandler) ListUsers(ctx context.Context, in *ListUsersRequest, out *ListUsersResponse) error {
-	return h.AuthServiceHandler.ListUsers(ctx, in, out)
-}
-
-func (h *AuthServiceHandler) UpdateUserRole(ctx context.Context, in *UpdateUserRoleRequest, out *UpdateUserRoleResponse) error {
-	return h.AuthServiceHandler.UpdateUserRole(ctx, in, out)
-}
-
-func (h *AuthServiceHandler) DeactivateUser(ctx context.Context, in *DeactivateUserRequest, out *DeactivateUserResponse) error {
-	return h.AuthServiceHandler.DeactivateUser(ctx, in, out)
-}
-
-// -------------------------------------------------------------------------------------------------------------------------
-
-func (h *AdminHandler) CreateAdmin(ctx context.Context, req *admin.CreateAdminRequest, rsp *admin.CreateAdminResponse) error {
-	log.Printf("CreateAdmin called with: name=%s, email=%s", req.Name, req.Email)
+func (h *AuthHandler) CreateAdmin(ctx context.Context, req *auth.CreateAdminRequest, rsp *auth.CreateAdminResponse) error {
+	log.Printf("Create admin called with: createdBy=%s", req.CreatedBy)
 
 	secret, err := service.GenerateTOTPSecret(req.Name)
 	if err != nil {
@@ -127,106 +224,252 @@ func (h *AdminHandler) CreateAdmin(ctx context.Context, req *admin.CreateAdminRe
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("Error generating hash password: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Hash pass error",
+			ErrorCode: "HASH_PASS_ERROR",
+		}
+		return nil
 	}
 
-	admin := model.Admin{
-		Name:         req.Name,
-		PasswordHash: string(hash),
-		Email:        req.Email,
-		TOTPSecret:   secret,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+	role := h.protoRoleToModel(req.Role)
+
+	admin := &model.User{
+		Email:      req.Email,
+		Password:   string(hash),
+		TOTPSecret: secret,
+		Name:       req.Name,
+		Phone:      req.Phone,
+		Role:       role,
+		Status:     model.StatusActive,
 	}
 
-	createdAdmin, err := h.adminService.CreateAdmin(ctx, &admin)
+	newAdmin, err := h.authService.CreateAdmin(ctx, admin)
 	if err != nil {
-		log.Printf("Error creating user: %v", err)
+		log.Printf("Error creating admin: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Create admin error",
+			ErrorCode: "CREATE_ADMIN_ERROR",
+		}
 		return err
 	}
 
-	rsp.Admin = h.modelToProto(createdAdmin)
-	rsp.Message = "User created successfully"
-
-	log.Printf("User created successfully: id=%d", admin.ID)
-	return nil
-}
-
-func (h *AdminHandler) GetAdmin(ctx context.Context, req *admin.GetAdminRequest, rsp *admin.GetAdminResponse) error {
-	log.Printf("GetAdmin called with id=%d", req.Id)
-
-	adminModel, err := h.adminService.GetAdminByID(ctx, int(req.Id))
-	if err != nil {
-		log.Printf("Error getting admin: %v", err)
-		return err
+	rsp.Admin = h.modelUserToProtoUserInfo(newAdmin)
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Create admin successful",
 	}
-
-	rsp.Admin = h.modelToProto(adminModel)
-	return nil
-}
-
-func (h *AdminHandler) UpdateAdmin(ctx context.Context, req *admin.UpdateAdminRequest, rsp *admin.UpdateAdminResponse) error {
-	log.Printf("UpdateAdmin called with id=%d", req.Id)
-
-	admin := model.Admin{
-		Name:      req.Name,
-		Email:     req.Email,
-		UpdatedAt: time.Now(),
-	}
-
-	updatedAdmin, err := h.adminService.UpdateAdmin(ctx, &admin)
-	if err != nil {
-		log.Printf("Error updating admin: %v", err)
-		return err
-	}
-
-	rsp.Admin = h.modelToProto(updatedAdmin)
-	rsp.Message = "Admin updated successfully"
-	return nil
-}
-
-func (h *AdminHandler) DeleteAdmin(ctx context.Context, req *admin.DeleteAdminRequest, rsp *admin.DeleteAdminResponse) error {
-	log.Panicf("DeleteAdmin called with id=%d", req.Id)
-
-	err := h.adminService.DeleteAdmin(ctx, int(req.Id))
-	if err != nil {
-		log.Panicf("Error deleting admin: %v", err)
-		return err
-	}
-
-	rsp.Message = "Admin deleted successfully"
-	return nil
-}
-
-func (h *AdminHandler) ListAdmins(ctx context.Context, req *admin.ListAdminsRequest, rsp *admin.ListAdminsResponse) error {
-	log.Printf("ListAdmins called with page=%d limit=%d", req.Page, req.Limit)
-
-	admins, total, err := h.adminService.ListAdmins(ctx, int(req.Page), int(req.Limit))
-	if err != nil {
-		log.Printf("Error listing admins: %v", err)
-		return err
-	}
-
-	rsp.Admins = make([]*admin.Admin, len(admins))
-	for i, adminModel := range admins {
-		rsp.Admins[i] = h.modelToProto(adminModel)
-	}
-
-	rsp.Total = int32(total)
-	rsp.Page = req.Page
-	rsp.Limit = req.Limit
 
 	return nil
 }
 
-func (h *AuthServiceHandler) modelToProto(u *model.User) *auth.UserInfo {
-	return &auth.UserInfo{
-		UserId:    int32(u.ID),
-		Email:     u.Email,
-		Name:      u.Name,
-		Phone:     u.Phone,
-		Role:      auth.UserRole(auth.UserRole_value[strings.ToUpper(string(u.Role))]),
-		Status:    auth.UserStatus(auth.UserStatus_value[strings.ToUpper(string(u.Status))]),
-		CreatedAt: timestamppb.New(u.CreatedAt),
-		LastLogin: timestamppb.New(*u.LastLogin),
+func (h *AuthHandler) ListUsers(ctx context.Context, req *auth.ListUsersRequest, rsp *auth.ListUsersResponse) error {
+	log.Printf("ListUsers called with page=%d, limit=%d", req.Page, req.Limit)
+
+	var roleFilter *model.UserRole
+	var statusFilter *model.UserStatus
+
+	if req.RoleFilter != auth.UserRole_USER {
+		modelRole := h.protoRoleToModel(req.RoleFilter)
+		roleFilter = &modelRole
+	}
+
+	if req.StatusFilter != auth.UserStatus_ACTIVE {
+		modelStatus := h.protoStatusToModel(req.StatusFilter)
+		statusFilter = &modelStatus
+	}
+
+	users, total, err := h.authService.ListUsers(ctx, int(req.Page), int(req.Limit), roleFilter, statusFilter)
+	if err != nil {
+		log.Printf("Error listing users: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Failed to list users",
+			ErrorCode: "LIST_ERROR",
+		}
+		return err
+	}
+
+	rsp.Users = make([]*auth.UserInfo, len(users))
+	for i, user := range users {
+		rsp.Users[i] = h.modelUserToProtoUserInfo(user)
+	}
+
+	limit := int32(req.Limit)
+	if limit == 0 {
+		limit = 10
+	}
+	totalPages := (int32(total) + limit - 1) / limit
+	currentPage := req.Page
+	if currentPage == 0 {
+		currentPage = 1
+	}
+
+	rsp.Pagination = &auth.PaginationInfo{
+		Total:       int32(total),
+		Page:        currentPage,
+		Limit:       limit,
+		TotalPages:  totalPages,
+		HasNext:     currentPage < totalPages,
+		HasPrevious: currentPage > 1,
+	}
+
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Users retrieved successfully",
+	}
+
+	return nil
+}
+
+func (h *AuthHandler) UpdateUserRole(ctx context.Context, req *auth.UpdateUserRoleRequest, rsp *auth.UpdateUserRoleResponse) error {
+	log.Printf("UpdateUserRole called with: user id=%s, updated by=%s", req.UserId, req.UpdatedBy)
+
+	userId, err := strconv.Atoi(req.UserId)
+	if err != nil {
+		log.Printf("Error user id: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Error user id",
+			ErrorCode: "USER_ID_ERROR",
+		}
+		return err
+	}
+
+	updatedBy, err := strconv.Atoi(req.UpdatedBy)
+	if err != nil {
+		log.Printf("Error updated by: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Error updated by",
+			ErrorCode: "UPDATED_BY_ERROR",
+		}
+		return err
+	}
+
+	if err := h.authService.UpdateUserRole(ctx, uint(userId), h.protoRoleToModel(req.NewRole), uint(updatedBy)); err != nil {
+		log.Printf("Error update user role: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Error update user role",
+			ErrorCode: "UPDATE_ROLE_ERROR",
+		}
+		return err
+	}
+
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Update user role successfully",
+	}
+
+	return nil
+}
+
+func (h *AuthHandler) DeactivateUser(ctx context.Context, req *auth.DeactivateUserRequest, rsp *auth.DeactivateUserResponse) error {
+	log.Printf("DeactivateUser called with: user id=%s", req.UserId)
+
+	userId, err := strconv.Atoi(req.UserId)
+	if err != nil {
+		log.Printf("Error user id: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Error user id",
+			ErrorCode: "USER_ID_ERROR",
+		}
+		return err
+	}
+
+	updatedBy, err := strconv.Atoi(req.UpdatedBy)
+	if err != nil {
+		log.Printf("Error updated by: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Error updated by",
+			ErrorCode: "UPDATED_BY_ERROR",
+		}
+		return err
+	}
+
+	if err := h.authService.DeactivateUser(ctx, uint(userId), h.protoStatusToModel(req.NewStatus), req.Reason, uint(updatedBy)); err != nil {
+		log.Printf("Error deactivate user: %v", err)
+		rsp.Status = &auth.ResponseStatus{
+			Success:   false,
+			Message:   "Error deactivate user",
+			ErrorCode: "DEACTIVATE_ERROR",
+		}
+		return err
+	}
+
+	rsp.Status = &auth.ResponseStatus{
+		Success: true,
+		Message: "Deactivate user successfully",
+	}
+
+	return nil
+}
+
+func (h *AuthHandler) modelUserToProtoUserInfo(user *model.User) *auth.UserInfo {
+	userInfo := &auth.UserInfo{
+		UserId:      strconv.Itoa(int(user.ID)),
+		Email:       user.Email,
+		Name:        user.Name,
+		Phone:       user.Phone,
+		Role:        h.modelRoleToProto(user.Role),
+		Status:      h.modelStatusToProto(user.Status),
+		Permissions: user.GetPermissions(),
+		CreatedAt:   timestamppb.New(user.CreatedAt),
+	}
+
+	if user.LastLogin != nil {
+		userInfo.LastLogin = timestamppb.New(*user.LastLogin)
+	}
+
+	return userInfo
+}
+
+// Role conversion helpers
+func (h *AuthHandler) protoRoleToModel(protoRole auth.UserRole) model.UserRole {
+	switch protoRole {
+	case auth.UserRole_ADMIN:
+		return model.RoleAdmin
+	case auth.UserRole_SUPER_ADMIN:
+		return model.RoleSuperAdmin
+	default:
+		return model.RoleUser
+	}
+}
+
+func (h *AuthHandler) modelRoleToProto(modelRole model.UserRole) auth.UserRole {
+	switch modelRole {
+	case model.RoleAdmin:
+		return auth.UserRole_ADMIN
+	case model.RoleSuperAdmin:
+		return auth.UserRole_SUPER_ADMIN
+	default:
+		return auth.UserRole_USER
+	}
+}
+
+// Status conversion helpers
+func (h *AuthHandler) protoStatusToModel(protoStatus auth.UserStatus) model.UserStatus {
+	switch protoStatus {
+	case auth.UserStatus_INACTIVE:
+		return model.StatusInactive
+	case auth.UserStatus_SUSPENDED:
+		return model.StatusSuspended
+	default:
+		return model.StatusActive
+	}
+}
+
+func (h *AuthHandler) modelStatusToProto(modelStatus model.UserStatus) auth.UserStatus {
+	switch modelStatus {
+	case model.StatusInactive:
+		return auth.UserStatus_INACTIVE
+	case model.StatusSuspended:
+		return auth.UserStatus_SUSPENDED
+	default:
+		return auth.UserStatus_ACTIVE
 	}
 }
