@@ -41,15 +41,8 @@ message RegisterRequest {
 }
 
 message RegisterResponse {
-    int32 user_id = 1;
-    string email = 2;
-    string name = 3;
-    UserRole role = 4;
-    UserStatus staus = 5;
-    string access_token = 6;
-    string refresh_token = 7;
-    google.protobuf.Timestamp expires_at = 8;
-    string message = 9;
+    UserInfo user = 1
+    string message = 2;
 }
 
 message LoginRequest {

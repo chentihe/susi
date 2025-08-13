@@ -5,22 +5,23 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/tihe/susi-auth-service/internal/model"
 	"github.com/tihe/susi-auth-service/internal/service"
-	"github.com/tihe/susi-proto/admin"
+	"github.com/tihe/susi-proto/auth"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-type AdminHandler struct {
-	adminService service.AdminService
+type AuthServiceHandler struct {
+	authService service.AuthService
 }
 
-func NewAdminHandler(adminService service.AdminService) *AdminHandler {
-	return &AdminHandler{
-		adminService: adminService,
+func NewAuthServiceHandler(authService service.AuthService) *AuthServiceHandler {
+	return &AuthServiceHandler{
+		authService: authService,
 	}
 }
 
@@ -41,6 +42,78 @@ func generateResetToken() (string, error) {
 	}
 	return base64.URLEncoding.EncodeToString(b), nil
 }
+
+func (h *AuthServiceHandler) Register(ctx context.Context, req *auth.RegisterRequest, rsp *auth.RegisterResponse) error {
+	log.Printf("Register called with: name=%s, email=%s", req.Name, req.Email)
+
+	secret, err := service.GenerateTOTPSecret(req.Name)
+	if err != nil {
+		log.Printf("Error generating TOTP: %v", err)
+		return err
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error generating hash password: %v", err)
+	}
+
+	user := model.User{
+		Name:       req.Name,
+		Password:   string(hash),
+		Email:      req.Email,
+		TOTPSecret: secret,
+		Phone:      req.Phone,
+		Role:       model.RoleUser,
+		Status:     model.StatusActive,
+	}
+
+	createdUser, err := h.authService.Register(ctx, &user)
+	if err != nil {
+		log.Printf("Error creating user: %v", err)
+		return err
+	}
+
+	rsp. = h.modelToProto(createdUser)
+	// TODO: need to refactor proto
+	rsp.Message = "User created successfully"
+
+	log.Printf("User created successfully: id=%d", admin.ID)
+	return nil
+}
+
+func (h *AuthServiceHandler) Login(ctx context.Context, in *LoginRequest, out *LoginResponse) error {
+	return h.AuthServiceHandler.Login(ctx, in, out)
+}
+
+func (h *AuthServiceHandler) RefreshToken(ctx context.Context, in *RefreshTokenRequest, out *RefreshTokenResponse) error {
+	return h.AuthServiceHandler.RefreshToken(ctx, in, out)
+}
+
+func (h *AuthServiceHandler) ValidateToken(ctx context.Context, in *ValidateTokenRequest, out *ValidateTokenResponse) error {
+	return h.AuthServiceHandler.ValidateToken(ctx, in, out)
+}
+
+func (h *AuthServiceHandler) Logout(ctx context.Context, in *LogoutRequest, out *LogoutResponse) error {
+	return h.AuthServiceHandler.Logout(ctx, in, out)
+}
+
+func (h *AuthServiceHandler) CreateAdmin(ctx context.Context, in *CreateAdminRequest, out *CreateAdminResponse) error {
+	return h.AuthServiceHandler.CreateAdmin(ctx, in, out)
+}
+
+func (h *AuthServiceHandler) ListUsers(ctx context.Context, in *ListUsersRequest, out *ListUsersResponse) error {
+	return h.AuthServiceHandler.ListUsers(ctx, in, out)
+}
+
+func (h *AuthServiceHandler) UpdateUserRole(ctx context.Context, in *UpdateUserRoleRequest, out *UpdateUserRoleResponse) error {
+	return h.AuthServiceHandler.UpdateUserRole(ctx, in, out)
+}
+
+func (h *AuthServiceHandler) DeactivateUser(ctx context.Context, in *DeactivateUserRequest, out *DeactivateUserResponse) error {
+	return h.AuthServiceHandler.DeactivateUser(ctx, in, out)
+}
+
+// -------------------------------------------------------------------------------------------------------------------------
 
 func (h *AdminHandler) CreateAdmin(ctx context.Context, req *admin.CreateAdminRequest, rsp *admin.CreateAdminResponse) error {
 	log.Printf("CreateAdmin called with: name=%s, email=%s", req.Name, req.Email)
@@ -145,12 +218,15 @@ func (h *AdminHandler) ListAdmins(ctx context.Context, req *admin.ListAdminsRequ
 	return nil
 }
 
-func (h *AdminHandler) modelToProto(u *model.Admin) *admin.Admin {
-	return &admin.Admin{
-		Id:        int32(u.ID),
-		Name:      u.Name,
+func (h *AuthServiceHandler) modelToProto(u *model.User) *auth.UserInfo {
+	return &auth.UserInfo{
+		UserId:    int32(u.ID),
 		Email:     u.Email,
+		Name:      u.Name,
+		Phone:     u.Phone,
+		Role:      auth.UserRole(auth.UserRole_value[strings.ToUpper(string(u.Role))]),
+		Status:    auth.UserStatus(auth.UserStatus_value[strings.ToUpper(string(u.Status))]),
 		CreatedAt: timestamppb.New(u.CreatedAt),
-		UpdatedAt: timestamppb.New(u.UpdatedAt),
+		LastLogin: timestamppb.New(*u.LastLogin),
 	}
 }

@@ -6,16 +6,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type Admin struct {
-	ID           int       `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name         string    `json:"username" gorm:"unique;not null"`
-	PasswordHash string    `json:"password_hash"`
-	Email        string    `json:"email" gorm:"uniqueIndex;not null"`
-	TOTPSecret   string    `json:"totp_secret" gorm:"column:totp_secret"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
-
 type UserRole string
 type UserStatus string
 
@@ -32,19 +22,18 @@ const (
 )
 
 type User struct {
-	ID        int        `json:"id" gorm:"primaryKey;autoIncrement"`
-	Email     string     `json:"email" gorm:"uniqueIndex;not null;type:varchar(100)"`
-	Password  string     `json:"-" gorm:"not null;type:varchar(255)"`
-	Name      string     `json:"name" gorm:"not null;type:varchar(100)"`
-	Phone     string     `json:"phone" gorm:"type:varchar(20)"`
-	Role      UserRole   `json:"role" gorm:"type:varchar(20);default:'user'"`
-	Status    UserStatus `json:"status" gorm:"type:varchar(20);default:'active'"`
-	LastLogin *time.Time `json:"last_login"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	gorm.Model
+	Email      string     `json:"email" gorm:"uniqueIndex;not null;type:varchar(100)"`
+	Password   string     `json:"-" gorm:"not null;type:varchar(255)"`
+	TOTPSecret string     `json:"totp_secret" gorm:"column:totp_secret"`
+	Name       string     `json:"name" gorm:"not null;type:varchar(100)"`
+	Phone      string     `json:"phone" gorm:"type:varchar(20)"`
+	Role       UserRole   `json:"role" gorm:"type:varchar(20);default:'user'"`
+	Status     UserStatus `json:"status" gorm:"type:varchar(20);default:'active'"`
+	LastLogin  *time.Time `json:"last_login"`
 
-	CreatedBy int32 `json:"created_by"`
-	UpdatedBy int32 `json:"updated_by"`
+	CreatedBy uint `json:"created_by"`
+	UpdatedBy uint `json:"updated_by"`
 }
 
 func (User) TableName() string {
