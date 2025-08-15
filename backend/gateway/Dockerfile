@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -6,7 +6,7 @@ WORKDIR /app
 COPY . .
 
 # Change to the gateway service directory
-WORKDIR /app/services/gateway
+WORKDIR /app/gateway
 
 # Download dependencies (the replace directive should work now)
 RUN go mod download
@@ -22,7 +22,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 
 # Copy the binary from builder stage
-COPY --from=builder /app/services/gateway/main .
+COPY --from=builder /app/gateway/main .
 
 # Expose port
 EXPOSE 8080

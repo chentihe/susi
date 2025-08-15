@@ -11,8 +11,8 @@ import "common/common.proto";
 service AuthService {
     rpc Register(RegisterRequest) returns (RegisterResponse) {
         option (google.api.http) = {
-        post: "/api/v1/auth/register"
-        body: "*"
+            post: "/api/v1/auth/register"
+            body: "*"
         };
     }
     rpc Login(LoginRequest) returns (LoginResponse);

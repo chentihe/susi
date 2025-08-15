@@ -67,7 +67,6 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
-      EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
       CONSUL_SERVER_URL: ${CONSUL_SERVER_URL}
       SERVICE_NAME: ${AUTH_SERVICE_NAME}
       SERVICE_PORT: ${AUTH_SERVICE_PORT}
@@ -96,7 +95,6 @@ services:
   #     DB_USER: ${DB_USER}
   #     DB_PASSWORD: ${DB_PASSWORD}
   #     KAFKA_BROKERS: ${KAFKA_BROKERS}
-  #     EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
   #     SERVICE_NAME: ${PROPERTY_SERVICE_NAME}
   #     SERVICE_PORT: ${PROPERTY_SERVICE_PORT}
   #   depends_on:
@@ -120,7 +118,6 @@ services:
   #     DB_USER: ${DB_USER}
   #     DB_PASSWORD: ${DB_PASSWORD}
   #     KAFKA_BROKERS: ${KAFKA_BROKERS}
-  #     EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
   #     SERVICE_NAME: ${TENANT_SERVICE_NAME}
   #     SERVICE_PORT: ${TENANT_SERVICE_PORT}
   #   depends_on:
@@ -144,7 +141,6 @@ services:
   #     DB_USER: ${DB_USER}
   #     DB_PASSWORD: ${DB_PASSWORD}
   #     KAFKA_BROKERS: ${KAFKA_BROKERS}
-  #     EUREKA_SERVER_URL: ${EUREKA_SERVER_URL}
   #     SERVICE_NAME: ${RENOVATION_SERVICE_NAME}
   #     SERVICE_PORT: ${RENOVATION_SERVICE_PORT}
   #   depends_on:
@@ -158,13 +154,22 @@ services:
   api-gateway:
     build:
       context: .
-      dockerfile: ./services/gateway/Dockerfile
+      dockerfile: ./gateway/Dockerfile
     ports:
       - "${GATEWAY_PORT}:${GATEWAY_PORT}"
     environment:
       CONSUL_SERVER_URL: ${CONSUL_SERVER_URL}
+      AUTH_SERVICE_NAME: ${AUTH_SERVICE_NAME}
     depends_on:
-      - consul
+      postgres:
+        condition: service_started
+      kafka:
+        condition: service_started
+      consul:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      
     networks:
       - susi-network
 

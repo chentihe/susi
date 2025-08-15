@@ -2,77 +2,19 @@ package main
 
 import (
 	"context"
-	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/tihe/susi-gateway/middleware"
 	"github.com/tihe/susi-proto/auth"
-	"go-micro.dev/v5"
-	"go-micro.dev/v5/client"
-	"go-micro.dev/v5/registry"
-	"go-micro.dev/v5/registry/consul"
+	"github.com/tihe/susi-shared/discovery/consul"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
-
-type ServiceClient struct {
-	client client.Client
-}
-
-func NewServiceClient(consulURL string) (*ServiceClient, error) {
-	reg := consul.NewConsulRegistry(registry.Addrs(consulURL))
-
-	service := micro.NewService(
-		micro.Registry(reg),
-		micro.Name("api-gateway"),
-	)
-
-	return &ServiceClient{
-		client: service.Client(),
-	}, nil
-}
-
-type GenericRequest struct {
-	Method  string                 `json:"method"`
-	Path    string                 `json:"path"`
-	Headers map[string]string      `json:"headers"`
-	Body    map[string]interface{} `json:"body,omitempty"`
-	Query   map[string]string      `json:"query,omitempty"`
-}
-
-func proxyRequestToGRPC(c *gin.Context, serviceClient *ServiceClient, serviceName, endpoint string) {
-
-}
-
-func handleAuthService(serviceClient *ServiceClient) gin.HandlerFunc {
-	return func(c *gin.Context) {
-
-	}
-}
-
-func proxyRequest(c *gin.Context, serviceDiscovery registry.Registry) {
-	// Copy headers
-
-	// Do the request
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("Failed to proxy request to %s: %v", serviceName, err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": "Service unavailable"})
-		return
-	}
-	defer resp.Body.Close()
-
-	// Copy response headers and status
-	for k, v := range resp.Header {
-		c.Writer.Header()[k] = v
-	}
-	c.Writer.WriteHeader(resp.StatusCode)
-	io.Copy(c.Writer, resp.Body)
-}
 
 func main() {
 	r := gin.Default()
@@ -82,7 +24,10 @@ func main() {
 		consulURL = "http://localhost:8500"
 	}
 
-	registry := consul.NewConsulRegistry(registry.Addrs(consulURL))
+	registry, err := consul.NewConsulClient(consulURL)
+	if err != nil {
+		log.Fatal("Failed to initialize registry")
+	}
 
 	// TODO: wrap a func to init all client
 	authServiceName := os.Getenv("AUTH_SERVICE_NAME")
@@ -93,11 +38,19 @@ func main() {
 	ctx := context.Background()
 	gatewayMux := runtime.NewServeMux()
 
-	authService, err := registry.GetService(authServiceName)
-	if err != nil || len(authService) == 0 {
-		log.Panicf("Cannot discover auth service: %v", err)
+	var authServiceURL string
+	for {
+		authServiceURL, err = registry.GetServiceURL(authServiceName)
+		if err != nil {
+			log.Printf("Cannot discover auth service: %v", err)
+			time.Sleep(5 * time.Second)
+		} else {
+			log.Printf("Discover auth service url: %s", authServiceURL)
+			break
+		}
 	}
-	authConn, err := grpc.NewClient(authService[0].Nodes[0].Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	authConn, err := grpc.NewClient(authServiceURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Panicf("Cannot connect to auth service: %v", err)
 	}
@@ -109,9 +62,7 @@ func main() {
 
 	// Public routes (no JWT validation required)
 	// Auth routes
-	r.Any("/api/v1/auth/*proxyPath", func(c *gin.Context) {
-		gin.WrapH(gatewayMux)
-	})
+	r.Any("/api/v1/auth/*proxyPath", gin.WrapH(gatewayMux))
 
 	// Protected routes (JWT validation required)
 	protected := r.Group("/api/v1")

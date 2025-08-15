@@ -8,12 +8,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tihe/susi-proto/auth"
-	"go-micro.dev/v5/registry"
+	"github.com/tihe/susi-shared/discovery"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func JWTAuthMiddleware(registry registry.Registry) gin.HandlerFunc {
+func JWTAuthMiddleware(registry discovery.ServiceDiscovery) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -44,8 +44,8 @@ func JWTAuthMiddleware(registry registry.Registry) gin.HandlerFunc {
 			// RequiredPermissions // TODO: add specific permissions if needed
 		}
 
-		service, err := registry.GetService("auth-service")
-		if err != nil || len(service) == 0 {
+		serviceURL, err := registry.GetServiceURL("auth-service")
+		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"error":   "Notfound",
 				"message": "Auth service not found",
@@ -53,7 +53,7 @@ func JWTAuthMiddleware(registry registry.Registry) gin.HandlerFunc {
 			return
 		}
 
-		conn, err := grpc.NewClient(service[0].Nodes[0].Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.NewClient(serviceURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"error":   "Connectionfailed",
