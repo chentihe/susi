@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
+	"time"
 
-	"go-micro.dev/v5"
-	"go-micro.dev/v5/registry"
-	"go-micro.dev/v5/registry/consul"
-	"go-micro.dev/v5/transport/grpc"
+	"google.golang.org/grpc"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/tihe/susi-auth-service/internal/repository"
 	"github.com/tihe/susi-auth-service/internal/service"
 	"github.com/tihe/susi-proto/auth"
+	"github.com/tihe/susi-shared/discovery/consul"
 	"github.com/tihe/susi-shared/events"
 )
 
@@ -64,12 +68,31 @@ func main() {
 
 	// Consul registration
 	consulURL := os.Getenv("CONSUL_SERVER_URL")
+	registry, err := consul.NewConsulClient(consulURL)
+	if err != nil {
+		log.Fatal("Failed to initialize registry")
+	}
 
 	// Service configuration
 	serviceName := os.Getenv("SERVICE_NAME")
 	if serviceName == "" {
 		serviceName = "auth-service"
 	}
+	servicePortStr := os.Getenv("SERVICE_PORT")
+	if servicePortStr == "" {
+		servicePortStr = "8081"
+	}
+	servicePort, err := strconv.Atoi(servicePortStr)
+	if err != nil {
+		log.Fatal("Invalid service port:", err)
+	}
+
+	hostname := os.Getenv("HOSTNAME")
+	if hostname == "" {
+		hostname = "localhost"
+	}
+
+	serviceId := fmt.Sprintf("%s:%s:%d", serviceName, hostname, servicePort)
 
 	// Initialize JWT key
 	if err := service.InitJWTKey(); err != nil {
@@ -86,23 +109,71 @@ func main() {
 	// Auth routes (public)
 	authHanlder := handler.NewAuthHandler(authService)
 
-	// Graceful shutdown setup
-	service := micro.NewService(
-		micro.Name(serviceName),
-		micro.Registry(consul.NewConsulRegistry(registry.Addrs(consulURL))),
-		micro.Transport(grpc.NewTransport()),
-		micro.AfterStop(func() error {
-			// TODO: add graceful shutdown process
-			log.Println("Auth service exiting")
-			return nil
-		}),
-	)
+	grpcServer := grpc.NewServer()
+	auth.RegisterAuthServiceServer(grpcServer, authHanlder)
 
-	service.Init()
-
-	auth.RegisterAuthServiceHandler(service.Server(), authHanlder)
-
-	if err := service.Run(); err != nil {
-		log.Printf("Error %s: %v", serviceName, err)
+	// Create gRPC listener
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", servicePort))
+	if err != nil {
+		log.Printf("failed to listen on gRPC port %d: %v", servicePort, err)
 	}
+
+	if err := registry.Register(serviceName, hostname, servicePort); err != nil {
+		log.Printf("Failed to register with Consul: %v", err)
+	} else {
+		log.Printf("Successfully registered with Consul as %s", serviceName)
+	}
+
+	// Start heartbeat goroutine
+	go func() {
+		for {
+			if err := registry.HealthCheck(serviceId); err != nil {
+				log.Printf("Failed to report healthy state: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
+	// Graceful shutdown setup
+	go func() {
+		log.Printf("gRPC server listening on %s:%d", hostname, servicePort)
+		log.Printf("Service: %s", serviceName)
+
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Printf("gRPC server error: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down auth service...")
+
+	// The context is used to inform the server it has 5 seconds to finish
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := registry.Deregister(serviceName, hostname, servicePort); err != nil {
+		log.Printf("Failed to deregister from Consul: %v", err)
+	} else {
+		log.Println("Successfully deregistered from Consul")
+	}
+
+	// Graceful stop gRPC server
+	done := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("gRPC server stopped gracefully")
+	case <-ctx.Done():
+		log.Println("Shutdown timeout exceeded, forcing stop")
+		grpcServer.Stop()
+	}
+
+	log.Println("All servers stopped")
 }

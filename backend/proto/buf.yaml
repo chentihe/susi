@@ -1,0 +1,12 @@
+version: v2
+deps:
+  - buf.build/googleapis/googleapis
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - STANDARD
+  except:
+    - IMPORT_NO_PUBLIC
+    - UNARY_RPC

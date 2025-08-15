@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package common;
+
+option go_package = "github.com/tihe/susi-proto/common";
+
+import "google/protobuf/timestamp.proto";
+
+// Common response status used across all services
+message ResponseStatus {
+    bool success = 1;
+    string message = 2;
+    string error_code = 3;
+    map<string, string> details = 4; // Optional: additional error details
+}
+
+// Common pagination info
+message PaginationInfo {
+    int32 total = 1;
+    int32 page = 2;
+    int32 limit = 3;
+    int32 total_pages = 4;
+    bool has_next = 5;
+    bool has_previous = 6;
+}
+
+// Common pagination request
+message PaginationRequest {
+    int32 page = 1;
+    int32 limit = 2;
+}
+
+// Common sort options
+message SortOptions {
+    string field = 1;
+    SortDirection direction = 2;
+}
+
+enum SortDirection {
+    ASC = 0;
+    DESC = 1;
+}
+
+// Common filter for date ranges
+message DateRangeFilter {
+    google.protobuf.Timestamp start_date = 1;
+    google.protobuf.Timestamp end_date = 2;
+}
+
+// Common metadata for tracking
+message AuditInfo {
+    string created_by = 1;
+    string updated_by = 2;
+    google.protobuf.Timestamp created_at = 3;
+    google.protobuf.Timestamp updated_at = 4;
+}
+
+// Standard error codes enum
+enum ErrorCode {
+    SUCCESS = 0;
+    INVALID_REQUEST = 1000;
+    UNAUTHORIZED = 1001;
+    FORBIDDEN = 1002;
+    NOT_FOUND = 1003;
+    CONFLICT = 1004;
+    VALIDATION_ERROR = 1005;
+    INTERNAL_ERROR = 2000;
+    SERVICE_UNAVAILABLE = 2001;
+    TIMEOUT = 2002;
+    RATE_LIMITED = 2003;
+    // Auth specific errors
+    INVALID_CREDENTIALS = 3000;
+    TOKEN_EXPIRED = 3001;
+    TOKEN_INVALID = 3002;
+    ACCOUNT_LOCKED = 3003;
+    ACCOUNT_DISABLED = 3004;
+    // Business logic errors
+    INSUFFICIENT_PERMISSIONS = 4000;
+    OPERATION_NOT_ALLOWED = 4001;
+    RESOURCE_LOCKED = 4002;
+}
+
+// Health check message
+message HealthCheckRequest {
+    string service = 1;
+}
+
+message HealthCheckResponse {
+    bool healthy = 1;
+    string status = 2;
+    map<string, string> details = 3;
+    google.protobuf.Timestamp timestamp = 4;
+}

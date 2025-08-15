@@ -2,12 +2,19 @@ syntax = "proto3";
 
 package auth;
 
-option go_package = "github.com/tihe/susi/backend/proto/auth";
+option go_package = "github.com/tihe/susi-proto/auth";
 
 import "google/protobuf/timestamp.proto";
+import "google/api/annotations.proto";
+import "common/common.proto";
 
 service AuthService {
-    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Register(RegisterRequest) returns (RegisterResponse) {
+        option (google.api.http) = {
+        post: "/api/v1/auth/register"
+        body: "*"
+        };
+    }
     rpc Login(LoginRequest) returns (LoginResponse);
     rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
     rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
@@ -50,12 +57,6 @@ message TokenInfo {
     google.protobuf.Timestamp expires_at = 3;
 }
 
-message ResponseStatus {
-    bool success = 1;
-    string message = 2;
-    string error_code = 3;
-}
-
 message RegisterRequest {
     string email = 1;
     string password = 2;
@@ -67,7 +68,7 @@ message RegisterRequest {
 message RegisterResponse {
     UserInfo user = 1;
     TokenInfo tokens = 2;
-    ResponseStatus status = 3;
+    common.ResponseStatus status = 3;
 }
 
 message LoginRequest {
@@ -79,7 +80,7 @@ message LoginRequest {
 message LoginResponse {
     UserInfo user = 1;
     TokenInfo tokens = 2;
-    ResponseStatus status = 3;
+    common.ResponseStatus status = 3;
 }
 
 message RefreshTokenRequest {
@@ -88,7 +89,7 @@ message RefreshTokenRequest {
 
 message RefreshTokenResponse {
     TokenInfo tokens = 1;
-    ResponseStatus status = 2;
+    common.ResponseStatus status = 2;
 }
 
 message ValidateTokenRequest {
@@ -99,7 +100,7 @@ message ValidateTokenRequest {
 message ValidateTokenResponse {
     bool valid = 1;
     UserInfo user = 2;
-    ResponseStatus status = 3;
+    common.ResponseStatus status = 3;
 }
 
 message LogoutRequest {
@@ -107,7 +108,7 @@ message LogoutRequest {
 }
 
 message LogoutResponse {
-    ResponseStatus status = 1;
+    common.ResponseStatus status = 1;
 }
 
 // Admin-specific messages
@@ -122,7 +123,7 @@ message CreateAdminRequest {
 
 message CreateAdminResponse {
     UserInfo admin = 1;
-    ResponseStatus status = 2;
+    common.ResponseStatus status = 2;
 }
 
 message ListUsersRequest {
@@ -134,11 +135,9 @@ message ListUsersRequest {
 
 message ListUsersResponse {
     repeated UserInfo users = 1;
-    PaginationInfo pagination = 2;
-    ResponseStatus status = 3;
+    common.PaginationInfo pagination = 2;
+    common.ResponseStatus status = 3;
 }
-
-
 
 message UpdateUserRoleRequest {
     string user_id = 1;
@@ -147,7 +146,7 @@ message UpdateUserRoleRequest {
 }
 
 message UpdateUserRoleResponse {
-    ResponseStatus status = 2;
+    common.ResponseStatus status = 2;
 }
 
 message DeactivateUserRequest {
@@ -158,14 +157,5 @@ message DeactivateUserRequest {
 }
 
 message DeactivateUserResponse {
-    ResponseStatus status = 2;
-}
-
-message PaginationInfo {
-    int32 total = 1;
-    int32 page = 2;
-    int32 limit = 3;
-    int32 total_pages = 4;
-    bool has_next = 5;
-    bool has_previous = 6;
+    common.ResponseStatus status = 2;
 }
