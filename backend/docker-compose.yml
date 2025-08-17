@@ -160,6 +160,8 @@ services:
     environment:
       CONSUL_SERVER_URL: ${CONSUL_SERVER_URL}
       AUTH_SERVICE_NAME: ${AUTH_SERVICE_NAME}
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_started

@@ -15,6 +15,12 @@ import (
 
 func JWTAuthMiddleware(registry discovery.ServiceDiscovery) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api/v1/auth/") {
+			c.Next()
+			return
+		}
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{

@@ -2,6 +2,7 @@ package consul
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/hashicorp/consul/api"
 )
@@ -60,6 +61,17 @@ func (c *ConsulClient) GetServiceURL(serviceName string) (string, error) {
 	// 	instances = append(instances, fmt.Sprintf("%s:%d", entry.Service.Address, entry.Service.Port))
 	// }
 	return fmt.Sprintf("%s:%d", services[0].Service.Address, services[0].Service.Port), nil
+}
+
+func (c *ConsulClient) GetServices() (map[string]*api.AgentService, error) {
+	services, err := c.client.Agent().Services()
+	if err != nil {
+		return nil, err
+	}
+	for name, service := range services {
+		log.Printf("name: %s, service: %v", name, service)
+	}
+	return services, nil
 }
 
 // HealthCheck performs an actual health check on the service
