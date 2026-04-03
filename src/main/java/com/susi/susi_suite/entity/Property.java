@@ -11,6 +11,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 @Entity
@@ -42,6 +43,11 @@ public class Property {
     @Column(name = "public_amenities", columnDefinition = "jsonb")
     private Map<String, Object> publicAmenities;
 
+    private String coverImage;
+
+    @Type(JsonBinaryType.class)
+    @Column(columnDefinition = "jsonb")
+    private List<String> images;
 
     private boolean isDeleted = false;
 
