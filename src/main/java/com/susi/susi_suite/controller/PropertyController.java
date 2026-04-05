@@ -1,5 +1,6 @@
 package com.susi.susi_suite.controller;
 
+import com.susi.susi_suite.dto.response.PropertyResponse;
 import com.susi.susi_suite.entity.Property;
 import com.susi.susi_suite.service.PropertyService;
 import lombok.RequiredArgsConstructor;
@@ -17,18 +18,18 @@ public class PropertyController {
     private final PropertyService propertyService;
 
     @GetMapping
-    public ResponseEntity<List<Property>> getAllProperties() {
+    public ResponseEntity<List<PropertyResponse>> getAllProperties() {
         return ResponseEntity.ok(propertyService.getAllProperties());
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Property> getPropertyById(@PathVariable Long id) {
+    public ResponseEntity<PropertyResponse> getPropertyById(@PathVariable Long id) {
         return ResponseEntity.ok(propertyService.getPropertyById(id));
     }
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Property> addProperty(@RequestBody Property property) {
+    public ResponseEntity<PropertyResponse> addProperty(@RequestBody Property property) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(propertyService.createProperty(property));
     }

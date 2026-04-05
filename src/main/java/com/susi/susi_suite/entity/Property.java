@@ -16,6 +16,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Entity
 @Table(name = "properties")
@@ -39,6 +41,14 @@ public class Property {
     private String scope;
     private String address;
     private String zipcode;
+
+    @PrePersist
+    @PreUpdate
+    public void generateFullAddress() {
+        this.address = Stream.of(city, area, road, scope)
+                .filter(s -> s != null && !s.isBlank())
+                .collect(Collectors.joining(""));
+    }
 
     private Integer totalFloors;
     private Integer floor;

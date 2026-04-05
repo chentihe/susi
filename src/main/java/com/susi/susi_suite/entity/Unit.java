@@ -33,7 +33,7 @@ public class Unit {
 
     private String roomNumber;
     private Integer rentAmount;
-    private Integer squareFootage; // 坪數 (或平方公尺)
+    private Double squareFootage; // 坪數 (或平方公尺)
 
     @Enumerated(EnumType.STRING)
     private UnitStatus status = UnitStatus.AVAILABLE;
