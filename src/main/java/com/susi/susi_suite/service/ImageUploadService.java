@@ -25,6 +25,7 @@ public class ImageUploadService {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("File is empty");
         }
+        log.info("File: {} is uploading...");
 
         // Check content type
         String contentType = file.getContentType();

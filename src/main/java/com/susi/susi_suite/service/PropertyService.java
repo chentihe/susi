@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 
 @Service
 @RequiredArgsConstructor
@@ -31,5 +32,9 @@ public class PropertyService {
 
     public List<Property> getAllProperties() {
         return propertyRepository.findAll();
+    }
+
+    public Property getPropertyById(Long id) throws NoSuchElementException {
+        return propertyRepository.findById(id).orElseThrow();
     }
 }

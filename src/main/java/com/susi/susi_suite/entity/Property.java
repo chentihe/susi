@@ -1,7 +1,9 @@
 package com.susi.susi_suite.entity;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Table;
 import lombok.Data;
 import org.hibernate.annotations.*;
@@ -11,6 +13,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -33,7 +36,13 @@ public class Property {
     private String city;
     private String area;
     private String road;
+    private String scope;
+    private String address;
     private String zipcode;
+
+    private Integer totalFloors;
+    private Integer floor;
+    private Integer basementFloors;
 
     @Column(name = "landlord_id")
     private Long landlordId;
@@ -42,6 +51,10 @@ public class Property {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "public_amenities", columnDefinition = "jsonb")
     private Map<String, Object> publicAmenities;
+
+    @OneToMany(mappedBy = "property", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference
+    private List<Unit> units = new ArrayList<>();
 
     private String coverImage;
 
@@ -52,10 +65,10 @@ public class Property {
     private boolean isDeleted = false;
 
     @CreatedDate
-    @Column(updatable = false, nullable = false)
+    @Column(updatable = false, nullable = false, insertable = false)
     private LocalDateTime createdAt;
 
     @LastModifiedDate
-    @Column(nullable = false)
+    @Column(nullable = false, insertable = false)
     private LocalDateTime updatedAt;
 }

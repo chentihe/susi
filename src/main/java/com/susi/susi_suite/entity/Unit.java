@@ -1,5 +1,6 @@
 package com.susi.susi_suite.entity;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
 import lombok.Data;
@@ -27,6 +28,7 @@ public class Unit {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "property_id")
+    @JsonBackReference
     private Property property;
 
     private String roomNumber;
@@ -47,10 +49,10 @@ public class Unit {
     private boolean isDeleted = false;
 
     @CreatedDate
-    @Column(updatable = false, nullable = false)
+    @Column(updatable = false, nullable = false, insertable = false)
     private LocalDateTime createdAt;
 
     @LastModifiedDate
-    @Column(nullable = false)
+    @Column(nullable = false, insertable = false)
     private LocalDateTime updatedAt;
 }
